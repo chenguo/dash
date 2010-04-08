@@ -564,7 +564,11 @@ out:
 	n->ncmd.args = args;
 	n->ncmd.assign = vars;
 	n->ncmd.redirect = redir;
-	return n;
+	union node *nwrap = (union node *) stalloc(sizeof (struct nredir));
+        nwrap->type = NBACKGND;
+	nwrap->nredir.n = n;
+	nwrap->nredir.redirect = NULL;
+	return nwrap;
 }
 
 STATIC union node *
