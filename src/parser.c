@@ -524,6 +524,7 @@ simplecmd(void) {
 			*rpp = n = redirnode;
 			rpp = &n->nfile.next;
 			parsefname();	/* read name of redirection file */
+			TRACE(("Redirect.\n"));
 			break;
 		case TLP:
 			if (
@@ -581,6 +582,7 @@ makename(void)
 	n->narg.next = NULL;
 	n->narg.text = wordtext;
 	n->narg.backquote = backquotelist;
+	TRACE(("File name %s\n", n->narg.text));
 	return n;
 }
 
