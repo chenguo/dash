@@ -1,9 +1,13 @@
+#include <alloca.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "dgraph.h"
 
 #include "shell.h"
+#include "memalloc.h"
+#include "nodes.h"
+#include "show.h"
 
 /* Implementation is a directed graph, nodes representing a
    running command points to commands that much wait for the
@@ -18,6 +22,17 @@
    dependents: a node's dependents is a list of nodes representing
      commands that must wait for the node to finish before running.
 */
+
+static int dg_file_check (struct dg_node *, struct dg_node *);
+static int dg_dep_add (struct dg_node *, struct dg_node *);
+static struct dg_file * dg_node_files (union node *);
+static struct dg_node * dg_node_create (union node *);
+void dg_graph_add (union node *);
+void dg_graph_remove (struct dg_node *);
+static void dg_frontier_add (struct dg_node *);
+void dg_frontier_remove (union node *);
+union node * dg_frontier_run (void);
+
 
 static struct dg_frontier *frontier;
 
@@ -125,10 +140,34 @@ dg_dep_add (struct dg_node *new_node, struct dg_node *node)
 
 /* Construct file access list for a command. */
 static struct dg_file *
-dg_node_files (union node *new_cmd)
+dg_node_files (union node *redir)
 {
-  /* TODO: flesh out. */
-  return NULL;
+  if (!redir)
+    return NULL;
+
+  struct dg_file *files = malloc (sizeof *files);
+  struct dg_file *iter = files;
+  while (1)
+    {
+      iter->file = redir->nfile.fname->narg.text;
+
+      /* Only handle these for now. */
+      if (redir->type == NFROM)
+        iter->rw = CONCURRENT_READ;
+      else if (redir->type == NTO || redir->type == NCLOBBER
+               || redir->type == NAPPEND)
+        iter->rw = WRITE_COLLISION;
+
+      if (redir->nfile.next)
+        {
+          iter->next = malloc (sizeof *iter->next);
+          iter = iter->next;
+          redir = redir->nfile.next;
+        }
+      else
+        break;
+    }
+  return files;
 }
 
 /* Create a node for NEW_CMD. */
@@ -137,9 +176,10 @@ dg_node_create (union node *new_cmd)
 {
   struct dg_node *new_node = malloc (sizeof *new_node);
   new_node->dependents = NULL;
-  new_node->files = dg_node_files (new_cmd);
+  new_node->files = dg_node_files (new_cmd->nredir.redirect);
   new_node->dependencies = 0;
-  new_node->command = new_cmd;
+  new_node->command = (union node *) stalloc (sizeof (struct nredir));
+  *new_node->command = *new_cmd;
 
   return new_node;
 }
@@ -148,6 +188,7 @@ dg_node_create (union node *new_cmd)
 void
 dg_graph_add (union node *new_cmd)
 {
+TRACE(("GRAPH ADD\n"));
   /* Create a node for this command. */
   struct dg_node *new_node = dg_node_create (new_cmd);
 
@@ -158,10 +199,12 @@ dg_graph_add (union node *new_cmd)
     {
       /* Follow frontier node and check for dependencies. */
       new_node->dependencies += dg_dep_add (new_node, iter->node);
+TRACE(("Deps %u\n", new_node->dependencies));
 
       /* Increment to next frontier node. */
       iter = iter->next;
     }
+TRACE(("GOT HERE\n"));
 
   /* If no file access dependencies, this is a frontier node. */
   if (new_node->dependencies == 0)
@@ -194,14 +237,32 @@ dg_graph_remove (struct dg_node *graph_node)
 
 
 /* Add a node to frontier. */
-void
+static void
 dg_frontier_add (struct dg_node *graph_node)
 {
+TRACE(("FRONTIER ADD\n"));
   /* Allocate new runnables node. */
-  frontier->tail->next = malloc (sizeof (struct dg_list));
+  struct dg_list *new_tail = malloc (sizeof *new_tail);
 
-  /* Point to new tail. */
-  frontier->tail = frontier->tail->next; 
+  if (frontier->tail)
+    {
+      /* Add new tail to LL. */
+      frontier->tail->next = new_tail;
+
+      /* Point to new tail. */
+      frontier->tail = frontier->tail->next; 
+
+      /* Set run next if not set. */
+      if (!frontier->run_next)
+        frontier->run_next = new_tail;
+    }
+  else
+    {
+      /* Frontier is currently empty. */
+      frontier->run_list = new_tail;
+      frontier->run_next = new_tail;
+      frontier->tail = new_tail;
+    }
 
   /* Fill out node. */
   frontier->tail->node = graph_node;
@@ -257,7 +318,13 @@ dg_frontier_remove (union node *cmd)
 union node *
 dg_frontier_run (void)
 {
-  union node *ret = frontier->run_next->node->command;
-  frontier->run_next = frontier->run_next->next;
-  return ret;
+TRACE(("FRNOTIER RUN\n"));
+  if (frontier->run_next)
+    {
+      union node *ret = frontier->run_next->node->command;
+      frontier->run_next = frontier->run_next->next;
+      return ret;
+    }
+  else
+    return NULL;
 }

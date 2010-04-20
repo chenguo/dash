@@ -91,7 +91,6 @@ STATIC void evalloop(union node *, int);
 STATIC void evalfor(union node *, int);
 STATIC void evalcase(union node *, int);
 STATIC void evalsubshell(union node *, int);
-STATIC void filecheck(union node *);
 STATIC void expredir(union node *);
 STATIC void evalpipe(union node *, int);
 #ifdef notyet
@@ -462,9 +461,6 @@ evalsubshell(union node *n, int flags)
 nofork:
 		redirect(n->nredir.redirect, 0);
 
-		/* Check if file(s) are accessible */
-		filecheck (n->nredir.redirect);
-
 		evaltreenr(n->nredir.n, flags);
 		/* never returns */
 	}
@@ -474,37 +470,6 @@ nofork:
 	exitstatus = status;
 	INTON;
 }
-
-/* Expands redirections like expredir, checking accessibiliy in the read/write
-   file access trees. */
-
-STATIC void
-filecheck (union node *n)
-{
-	union node *redir;
-
-	for (redir = n ; redir ; redir = redir->nfile.next) {
-		if (redir->type == NFROM) {
-			/* If search returns linked list from write tree
-				Extract PIDs
-				Wait on PIDs. */
-			/* Else if search returns null, add file to read tree. */
-		}
-		else if (redir->type == NTO ||
-			 redir->type == NCLOBBER ||
-			 redir->type == NAPPEND)
-		{
-			/* If search returns linked list from write tree
-				Extract PIDs
-				Wait on PIDs. */
-			/* Else if search returns linked list from read tree
-				Extract PIDs
-				Wait on PIDs. */
-			/* Else, add file to write tree. */
-		}
-	}
-}
-
 
 /*
  * Compute the names of the files in a redirection list.
