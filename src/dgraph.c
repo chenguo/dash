@@ -1,7 +1,9 @@
 #include <stdlib.h>
+#include <string.h>
 
 #include "dgraph.h"
 
+#include "shell.h"
 
 /* Implementation is a directed graph, nodes representing a
    running command points to commands that much wait for the
@@ -83,7 +85,7 @@ dg_dep_add (struct dg_node *new_node, struct dg_node *node)
 {
   /* Establish dependency. */
   int file_access = dg_file_check (new_node, node);
-  if (file_access = NO_CLASH)
+  if (file_access == NO_CLASH)
     return 0;
 
   int deps = 0;
@@ -121,14 +123,37 @@ dg_dep_add (struct dg_node *new_node, struct dg_node *node)
   return deps;
 }
 
-/* Add a node to the graph. */
-void
-dg_graph_add (struct dg_node *new_node)
+/* Construct file access list for a command. */
+static struct dg_file *
+dg_node_files (union node *new_cmd)
 {
+  /* TODO: flesh out. */
+  return NULL;
+}
+
+/* Create a node for NEW_CMD. */
+static struct dg_node *
+dg_node_create (union node *new_cmd)
+{
+  struct dg_node *new_node = malloc (sizeof *new_node);
+  new_node->dependents = NULL;
+  new_node->files = dg_node_files (new_cmd);
+  new_node->dependencies = 0;
+  new_node->command = new_cmd;
+
+  return new_node;
+}
+
+/* Add a new command to the directed graph. */
+void
+dg_graph_add (union node *new_cmd)
+{
+  /* Create a node for this command. */
+  struct dg_node *new_node = dg_node_create (new_cmd);
+
   /* Step through frontier nodes. */
   struct dg_list *iter = frontier->run_list;
 
-  new_node->dependencies = 0;
   while (iter)
     {
       /* Follow frontier node and check for dependencies. */
@@ -229,4 +254,10 @@ dg_frontier_remove (union node *cmd)
     }    
 }
 
-
+union node *
+dg_frontier_run (void)
+{
+  union node *ret = frontier->run_next->node->command;
+  frontier->run_next = frontier->run_next->next;
+  return ret;
+}

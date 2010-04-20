@@ -226,6 +226,11 @@ cmdloop(int top)
 			chkmail();
 		}
 		n = parsecmd(inter);
+		TRACE(("n: %u\n", n));
+		dg_graph_add (n);
+		n = dg_frontier_run ();
+		TRACE(("n again %u\n", n));
+
 		/* showtree(n); DEBUG */
 		if (n == NEOF) {
 			if (!top || numeof >= 50)

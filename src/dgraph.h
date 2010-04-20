@@ -34,3 +34,4 @@ struct dg_frontier
 void dg_graph_init (void);
 void dg_frontier_add (struct dg_node *);
 void dg_frontier_remove (union node *cmd);
+union node *dg_frontier_run (void);
