@@ -64,6 +64,7 @@ dg_graph_init (void)
 static int
 dg_file_check (struct dg_node *node1, struct dg_node *node2)
 {
+TRACE(("FILE CHECK\n"));
   struct dg_file *files1 = node1->files;
   struct dg_file *files2 = node2->files;
 
@@ -72,22 +73,27 @@ dg_file_check (struct dg_node *node1, struct dg_node *node2)
     {
       while (files2)
         {
+TRACE(("CHECKING %s and %s\n", files1->file, files2->file));
           /* If same file is accessed. */
           if (strcmp (files1->file, files2->file) == 0)
             {
+TRACE(("still here\n"));
               if (files1->rw == WRITE_ACCESS || files2->rw == WRITE_ACCESS)
+{
+TRACE(("write coll\n"));
                 return WRITE_COLLISION;
-              else
+} 
+             else
                 mult_read = CONCURRENT_READ;
             } 
-
+TRACE(("Set files2 to next\n"));
           files2 = files2->next;
         }
-
+TRACE(("Set files1 to next, reset files2\n"));
       files1 = files1->next;
       files2 = node2->files;
     }
-
+TRACE(("FILE CHECK ret %i\n", mult_read));
   /* Either no files in common or concurrent read. */
   return mult_read;
 }
@@ -98,6 +104,7 @@ dg_file_check (struct dg_node *node1, struct dg_node *node2)
 static int
 dg_dep_add (struct dg_node *new_node, struct dg_node *node)
 {
+TRACE(("DEP ADD\n"));
   /* Establish dependency. */
   int file_access = dg_file_check (new_node, node);
   if (file_access == NO_CLASH)
@@ -107,41 +114,51 @@ dg_dep_add (struct dg_node *new_node, struct dg_node *node)
   struct dg_list *iter = node->dependents;
 
   /* Check dependency on node's dependents. */
-  if (iter == NULL)
-    return 0;
+  if (iter)
+    while (1)
+      {
+TRACE(("DEP ADD in while\n"));
+        /* Check if NEW_NODE is already a dependent of NODE. */
+        if (new_node == iter->node)
+          return 0;
 
-  while (1)
+        /* Recursive call on dependent. */
+        deps += dg_dep_add (new_node, iter->node);
+
+        if (iter->next)
+          iter = iter->next;
+        else
+          break;
+     }
+  else if (file_access == WRITE_COLLISION)
     {
-      /* Check if NEW_NODE is already a dependent of NODE. */
-      if (new_node == iter->node)
-        return 0;
-
-      /* Recursive call on dependent. */
-      deps += dg_dep_add (new_node, iter->node);
-
-      if (iter->next)
-        iter = iter->next;
-      else
-        break;
-   }
+TRACE(("DEP ADD first dep\n"));
+      node->dependents = malloc (sizeof (struct dg_list));
+      node->dependents->node = new_node;
+      node->dependents->next = NULL;
+      deps++;
+    }
 
   /* If no depedencies found, add NEW_NODE as one. */
   if (deps == 0 && file_access == WRITE_COLLISION)
     {
+TRACE(("DEP ADD add new dep\n"));
       iter->next = malloc (sizeof (struct dg_list));
       iter = iter->next;
       iter->node = new_node;
       iter->next = NULL;
       deps++;
     }
-
+TRACE(("DEP ADD ret %i\n", deps));
   return deps;
 }
+
 
 /* Construct file access list for a command. */
 static struct dg_file *
 dg_node_files (union node *redir)
 {
+TRACE(("NODE FILES\n"));
   if (!redir)
     return NULL;
 
@@ -149,14 +166,19 @@ dg_node_files (union node *redir)
   struct dg_file *iter = files;
   while (1)
     {
-      iter->file = redir->nfile.fname->narg.text;
+      char *file = redir->nfile.fname->narg.text;
+      iter->name_size = strlen (file) + 1;
+      iter->file = malloc (iter->name_size);
+      strncpy (iter->file, file, strlen (file));
+      iter->file[iter->name_size - 1] = '\0';
+TRACE(("File: %s\n", iter->file));
 
       /* Only handle these for now. */
       if (redir->type == NFROM)
-        iter->rw = CONCURRENT_READ;
+        iter->rw = READ_ACCESS;
       else if (redir->type == NTO || redir->type == NCLOBBER
                || redir->type == NAPPEND)
-        iter->rw = WRITE_COLLISION;
+        iter->rw = WRITE_ACCESS;
 
       if (redir->nfile.next)
         {
@@ -165,24 +187,33 @@ dg_node_files (union node *redir)
           redir = redir->nfile.next;
         }
       else
-        break;
+        {
+          iter->next = NULL;
+          break;
+        }
     }
   return files;
 }
+
 
 /* Create a node for NEW_CMD. */
 static struct dg_node *
 dg_node_create (union node *new_cmd)
 {
+TRACE(("NODE CREATE %i\n", new_cmd->type));
   struct dg_node *new_node = malloc (sizeof *new_node);
   new_node->dependents = NULL;
-  new_node->files = dg_node_files (new_cmd->nredir.redirect);
+
+  union node *flist = new_cmd->nredir.n->ncmd.redirect;
+
+  new_node->files = dg_node_files (flist);
   new_node->dependencies = 0;
   new_node->command = (union node *) stalloc (sizeof (struct nredir));
   *new_node->command = *new_cmd;
 
   return new_node;
 }
+
 
 /* Add a new command to the directed graph. */
 void
@@ -204,7 +235,6 @@ TRACE(("Deps %u\n", new_node->dependencies));
       /* Increment to next frontier node. */
       iter = iter->next;
     }
-TRACE(("GOT HERE\n"));
 
   /* If no file access dependencies, this is a frontier node. */
   if (new_node->dependencies == 0)
@@ -314,6 +344,7 @@ dg_frontier_remove (union node *cmd)
         }
     }    
 }
+
 
 union node *
 dg_frontier_run (void)
