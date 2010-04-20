@@ -37,6 +37,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <pthread.h>
 
 
 #include "shell.h"
@@ -205,6 +206,8 @@ cmdloop(int top)
 	struct stackmark smark;
 	int inter;
 	int numeof = 0;
+
+	dg_graph_init();
 
 	TRACE(("cmdloop(%d) called\n", top));
 #ifdef HETIO
