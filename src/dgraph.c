@@ -1,4 +1,5 @@
 #include <alloca.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -57,8 +58,22 @@ dg_graph_init (void)
   frontier->run_list = NULL;
   frontier->run_next = NULL;
   frontier->tail = NULL;
+  pthread_mutex_init (&frontier->dg_lock, NULL);
 }
 
+/* Lock down graph. */
+void
+dg_graph_lock (void)
+{
+  pthread_mutex_lock (&frontier->dg_lock);
+}
+
+/* Unlock graph. */
+void
+dg_graph_unlock (void)
+{
+  pthread_mutex_unlock (&frontier->dg_lock);
+}
 
 /* Cross check file lists for access conflicts. */
 static int

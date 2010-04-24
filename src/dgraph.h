@@ -1,3 +1,5 @@
+#include <pthread.h>
+
 /* Linked list of command nodes. */
 struct dg_list
 {
@@ -30,9 +32,12 @@ struct dg_frontier
   struct dg_list *run_list;    /* Running/runnable commands. */
   struct dg_list *run_next;    /* Next non-running runnable command. */
   struct dg_list *tail;        /* Last element in LL. */
+  pthread_mutex_t dg_lock;     /* Lock for directed grah. */
 };
 
 void dg_graph_init (void);
+void dg_graph_lock (void);
+void dg_graph_unlock (void);
 void dg_graph_add (union node *);
 void dg_graph_remove (struct dg_node *);
 union node *dg_frontier_run (void);
