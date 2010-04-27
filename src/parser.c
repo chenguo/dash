@@ -71,6 +71,7 @@
 /* Used by expandstr to get here-doc like behaviour. */
 #define FAKEEOFMARK (char *)1
 
+#define stalloc malloc
 
 
 struct heredoc {
@@ -562,7 +563,10 @@ out:
 	*rpp = NULL;
 	n = (union node *)stalloc(sizeof (struct ncmd));
 	n->type = NCMD;
-	n->ncmd.args = args;
+	n->ncmd.args = (union node *)stalloc (sizeof (struct narg));
+	*n->ncmd.args = *args;
+//TRACE(("SIMPLECMD args %p args->next %p args3 %p\n", n->ncmd.args, args->narg.next, args->narg.next->narg.next));
+
 	n->ncmd.assign = vars;
 	n->ncmd.redirect = redir;
 	union node *nwrap = (union node *) stalloc(sizeof (struct nredir));

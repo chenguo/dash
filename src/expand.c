@@ -676,7 +676,10 @@ subevalvar(char *p, char *str, int strloc, int subtype, int startloc, int varfla
 	subtype -= VSTRIMRIGHT;
 #ifdef DEBUG
 	if (subtype < 0 || subtype > 3)
+	{
+		TRACE(("SUBVALVAR abort\n"));
 		abort();
+	}
 #endif
 
 	rmesc = startp;
@@ -804,6 +807,7 @@ record:
 	case VSTRIMRIGHTMAX:
 		break;
 	default:
+		TRACE(("EVALVALVAR abort 2\n"));
 		abort();
 	}
 #endif

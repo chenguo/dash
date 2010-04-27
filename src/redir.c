@@ -222,6 +222,7 @@ openredirect(union node *redir)
 		break;
 	default:
 #ifdef DEBUG
+		TRACE(("OPENREDIRECT abort\n"));
 		abort();
 #endif
 		/* Fall through to eliminate warning. */

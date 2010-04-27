@@ -4,7 +4,8 @@
 struct dg_list
 {
   struct dg_node *node;        /* Node for dependent command. */
-  struct dg_list *next;        /* Next dependent command. */
+  struct dg_list *next;        /* Next node in list. */
+  struct dg_list *prev;        /* Previous node in list. */
 };
 
 /* File/var dependencies of a command. */
@@ -22,7 +23,7 @@ struct dg_node
   struct dg_list *dependents;  /* Commands dependent on this one. */
   struct dg_file *files;       /* Files/vars this command reads/writes. */
   int dependencies;            /* Number of blocking commands. */
-  union node *command;        /* Command to evaluate. */   
+  union node *command;         /* Command to evaluate. */   
 };
 
 
@@ -39,5 +40,5 @@ void dg_graph_init (void);
 void dg_graph_lock (void);
 void dg_graph_unlock (void);
 void dg_graph_add (union node *);
-void dg_graph_remove (struct dg_node *);
-union node *dg_frontier_run (void);
+struct dg_list *dg_graph_run (void);
+void dg_frontier_remove (struct dg_list *);

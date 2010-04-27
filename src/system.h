@@ -87,7 +87,10 @@ static inline int killpg(pid_t pid, int signal)
 {
 #ifdef DEBUG
 	if (pid < 0)
+{
+TRACE(("KILLPG abort\n"));
 		abort();
+}
 #endif
 	return kill(-pid, signal);
 }

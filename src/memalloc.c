@@ -150,6 +150,7 @@ stunalloc(pointer p)
 #ifdef DEBUG
 	if (!p || (stacknxt < (char *)p) || ((char *)p < stackp->space)) {
 		write(2, "stunalloc\n", 10);
+		TRACE(("STUNALLOC abort\n"));
 		abort();
 	}
 #endif
@@ -176,6 +177,7 @@ void setstackmark(struct stackmark *mark)
 void
 popstackmark(struct stackmark *mark)
 {
+return;
 	struct stack_block *sp;
 
 	INTOFF;

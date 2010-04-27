@@ -1,6 +1,6 @@
 AM_YFLAGS = -d
 
-COMMON_CFLAGS = -Wall
+COMMON_CFLAGS = -Wall -pthread
 COMMON_CPPFLAGS = \
 	-include $(top_builddir)/config.h \
 	-DBSD=1 -DSHELL \

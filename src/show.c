@@ -161,6 +161,7 @@ sharg(union node *arg, FILE *fp)
 
 	if (arg->type != NARG) {
 		printf("<node type %d>\n", arg->type);
+		TRACE(("SHARG abort\n"));
 		abort();
 	}
 	bqlist = arg->narg.backquote;

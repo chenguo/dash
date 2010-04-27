@@ -85,7 +85,10 @@ chkmail(void)
 		for (q = p ; *q ; q++);
 #ifdef DEBUG
 		if (q[-1] != '/')
+	{
+TRACE(("CHKMAIL abort\n"));
 			abort();
+	}
 #endif
 		q[-1] = '\0';			/* delete trailing '/' */
 		if (stat64(p, &statb) < 0) {

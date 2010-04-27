@@ -37,6 +37,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#include <dgraph.h>
+
 /* Mode argument to forkshell.  Don't change FORK_FG or FORK_BG. */
 #define FORK_FG 0
 #define FORK_BG 1
@@ -59,6 +61,7 @@ struct procstat {
 	pid_t	pid;		/* process id */
  	int	status;		/* last process status from wait() */
  	char	*cmd;		/* text of command being run */
+ 	struct dg_list *node;	/* node in frontier. Used for removal. */
 };
 
 struct job {
@@ -99,7 +102,7 @@ int jobscmd(int, char **);
 struct output;
 void showjobs(struct output *, int);
 int waitcmd(int, char **);
-struct job *makejob(union node *, int);
+struct job *makejob(union node *, int, struct dg_list *);
 int forkshell(struct job *, union node *, int);
 int waitforjob(struct job *);
 int stoppedjobs(void);

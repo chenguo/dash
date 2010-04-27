@@ -142,6 +142,7 @@ set_curjob(struct job *jp, unsigned mode)
 	switch (mode) {
 	default:
 #ifdef DEBUG
+		TRACE(("SETCURJOB abort\n"));
 		abort();
 #endif
 	case CUR_DELETE:
@@ -265,6 +266,7 @@ usage:
 				switch (c) {
 				default:
 #ifdef DEBUG
+					TRACE(("KILLCMD abort\n"));
 					abort();
 #endif
 				case 'l':
@@ -443,6 +445,7 @@ out:
 static void
 showjob(struct output *out, struct job *jp, int mode)
 {
+TRACE(("showjob called.\n"));
 	struct procstat *ps;
 	struct procstat *psend;
 	int col;
@@ -478,6 +481,11 @@ showjob(struct output *out, struct job *jp, int mode)
 #if JOBS
 		if (jp->state == JOBSTOPPED)
 			status = jp->stopstatus;
+		else {/* JOBDONE */
+			dg_graph_lock ();
+			dg_frontier_remove (jp->ps0.node);
+			dg_graph_unlock ();
+		}
 #endif
 		col += sprint_status(s + col, status, 0);
 	}
@@ -548,7 +556,7 @@ showjobs(struct output *out, int mode)
 {
 	struct job *jp;
 
-	TRACE(("showjobs(%x) called\n", mode));
+//	TRACE(("showjobs(%x) called\n", mode));
 
 	/* If not even one one job changed, there is nothing to do */
 	while (dowait(DOWAIT_NORMAL, NULL) > 0)
@@ -741,7 +749,7 @@ err:
  */
 
 struct job *
-makejob(union node *node, int nprocs)
+makejob(union node *node, int nprocs, struct dg_list *dgraph_node)
 {
 	int i;
 	struct job *jp;
@@ -769,6 +777,7 @@ makejob(union node *node, int nprocs)
 	curjob = jp;
 	jp->used = 1;
 	jp->ps = &jp->ps0;
+	jp->ps0.node = dgraph_node;
 	if (nprocs > 1) {
 		jp->ps = ckmalloc(nprocs * sizeof (struct procstat));
 	}
@@ -917,7 +926,10 @@ forkparent(struct job *jp, union node *n, int mode, pid_t pid)
 		ps->status = -1;
 		ps->cmd = nullstr;
 		if (jobctl && n)
+{
+TRACE(("FORKPARENT call commandtext, n->type %d\n", n->type));
 			ps->cmd = commandtext(n);
+}
 	}
 }
 
@@ -1008,9 +1020,9 @@ dowait(int block, struct job *job)
 	int state;
 
 	INTOFF;
-	TRACE(("dowait(%d) called\n", block));
+//	TRACE(("dowait(%d) called\n", block));
 	pid = waitproc(block, &status);
-	TRACE(("wait returns pid %d, status=%d\n", pid, status));
+//	TRACE(("wait returns pid %d, status=%d\n", pid, status));
 	if (pid <= 0)
 		goto out;
 
@@ -1187,6 +1199,7 @@ commandtext(union node *n)
 	char *name;
 
 	STARTSTACKSTR(cmdnextc);
+TRACE(("COMMANDTEXT cmdtxt n->type %d, n %p\n", n->type, n));
 	cmdtxt(n);
 	name = stackblock();
 //	TRACE(("commandtext: name %p, end %p\n\t\"%s\"\n",
@@ -1198,6 +1211,7 @@ commandtext(union node *n)
 STATIC void
 cmdtxt(union node *n)
 {
+TRACE(("CMDTXT n->type: %d, n %p\n", n->type, n));
 	union node *np;
 	struct nodelist *lp;
 	const char *p;
@@ -1208,6 +1222,7 @@ cmdtxt(union node *n)
 	switch (n->type) {
 	default:
 #if DEBUG
+		TRACE(("CMDTXT abort n->type: %d, n %p\n", n->type, n));
 		abort();
 #endif
 	case NPIPE:

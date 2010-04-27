@@ -201,7 +201,10 @@ int hetio_read_input(int fd)
 					break;
 				case 4:		/* Control-D */
 					if (!len)
+{
+TRACE(("HETIO exitshell\n"));
 						exitshell(0);
+}
 					break;
 				case 21: 	/* Control-U */
 					/* Return to begining of line. */

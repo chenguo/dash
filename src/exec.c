@@ -323,6 +323,7 @@ find_command(char *name, struct cmdentry *entry, int act, const char *path)
 		switch (cmdp->cmdtype) {
 		default:
 #if DEBUG
+			TRACE(("FINDCOMMAND abort\n"));
 			abort();
 #endif
 		case CMDNORMAL:
@@ -846,7 +847,9 @@ commandcmd(argc, argv)
 			verify |= VERIFY_BRIEF;
 #ifdef DEBUG
 		else if (c != 'p')
-			abort();
+		{
+			TRACE(("COMMANDCMD abort\n"));
+			abort();}
 #endif
 
 	cmd = *argptr;

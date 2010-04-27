@@ -80,6 +80,7 @@ extern int etext();
 STATIC void read_profile(const char *);
 STATIC char *find_dot_file(char *);
 static int cmdloop(int);
+static void *parseloop(void *);
 int main(int, char **);
 
 /*
@@ -120,7 +121,6 @@ main(int argc, char **argv)
 		s = state;
 		if (e == EXEXIT || s == 0 || iflag == 0 || shlvl)
 			exitshell();
-
 		if (e == EXINT
 #if ATTY
 		 && (! attyset() || equal(termval(), "emacs"))
@@ -179,6 +179,7 @@ state3:
 	if (sflag || minusc == NULL) {
 state4:	/* XXX ??? - why isn't this before the "if" statement */
 		cmdloop(1);
+TRACE(("CMDLOOP ret\n"));
 	}
 #if PROFILE
 	monitor(0);
@@ -189,6 +190,7 @@ state4:	/* XXX ??? - why isn't this before the "if" statement */
 		_mcleanup();
 	}
 #endif
+TRACE(("EXIT SHELL\n"));
 	exitshell();
 	/* NOTREACHED */
 }
@@ -203,31 +205,53 @@ static int
 cmdloop(int top)
 {
 	union node *n;
+	pthread_t thread;
+	int numeof = 0;
+	struct dg_list *frontier_node;
+
 	struct stackmark smark;
 	int inter;
-	int numeof = 0;
 
-	dg_graph_init();
-
-	TRACE(("cmdloop(%d) called\n", top));
+	TRACE(("cmdloop(%d) called\n", &top));
 #ifdef HETIO
 	if(iflag && top)
 		hetio_init();
 #endif
-	for (;;) {
-		int skip;
 
-		setstackmark(&smark);
+	dg_graph_init();
+	pthread_create (&thread, NULL, parseloop, (void *) &top);
+
+
+	while (1) {
+//		int skip;
+//		setstackmark(&smark);
 		if (jobctl)
 			showjobs(out2, SHOW_CHANGED);
-		inter = 0;
+/*		inter = 0;
 		if (iflag && top) {
 			inter++;
 			chkmail();
 		}
+
 		n = parsecmd(inter);
-		dg_graph_add (n);
-		n = dg_frontier_run ();
+		if (n) {
+			TRACE(("Nodetype: %i\n", n->type));
+			dg_graph_lock ();
+			dg_graph_add (n);
+			dg_graph_unlock ();
+		}
+*/
+
+		dg_graph_lock ();
+		frontier_node = dg_graph_run ();
+		dg_graph_unlock ();
+		if (frontier_node) {	
+			n = frontier_node->node->command;
+			TRACE(("CMDLOOP: type %d\n", n->type));
+//			TRACE(("CMDLOOP: n %p redir %p, args %p, args2 %p, args3 %p\n", n, n->nredir.n, n->nredir.n->ncmd.args,
+//                                n->nredir.n->ncmd.args->narg.next, n->nredir.n->ncmd.args->narg.next->narg.next));
+		} else
+			n = NULL;
 
 		/* showtree(n); DEBUG */
 		if (n == NEOF) {
@@ -242,7 +266,50 @@ cmdloop(int top)
 		} else if (nflag == 0) {
 			job_warning = (job_warning == 2) ? 1 : 0;
 			numeof = 0;
-			evaltree(n, 0);
+			evaltree(n, 0, frontier_node);
+		}
+
+//		popstackmark(&smark);
+
+/*		skip = evalskip;
+		if (skip) {
+			evalskip = 0;
+			break;
+		}
+*/	}
+
+	return 0;
+}
+
+
+static void *
+parseloop (void *topp)
+{
+	struct stackmark smark;
+	int inter;
+	int top = *(int *) topp;
+	union node *n;
+
+	TRACE(("PARSELOOP entered\n"));
+
+	for (;;) {
+		int skip;
+
+		setstackmark(&smark);
+//		if (jobctl)
+//			showjobs(out2, SHOW_CHANGED);
+		inter = 0;
+		if (iflag && top) {
+			inter++;
+			chkmail();
+		}
+
+		n = parsecmd(inter);
+		if (n) {
+			TRACE(("Nodetype: %i\n", n->type));
+			dg_graph_lock ();
+			dg_graph_add (n);
+			dg_graph_unlock ();
 		}
 		popstackmark(&smark);
 
@@ -253,9 +320,8 @@ cmdloop(int top)
 		}
 	}
 
-	return 0;
+	return NULL;
 }
-
 
 
 /*

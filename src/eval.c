@@ -48,7 +48,6 @@
 #include "parser.h"
 #include "jobs.h"
 #include "eval.h"
-#include "dgraph.h"	/* directed graph */
 #include "builtins.h"
 #include "options.h"
 #include "exec.h"
@@ -90,7 +89,7 @@ void evaltreenr(union node *, int) __attribute__ ((__noreturn__));
 STATIC void evalloop(union node *, int);
 STATIC void evalfor(union node *, int);
 STATIC void evalcase(union node *, int);
-STATIC void evalsubshell(union node *, int);
+STATIC void evalsubshell(union node *, int, struct dg_list *);
 STATIC void expredir(union node *);
 STATIC void evalpipe(union node *, int);
 #ifdef notyet
@@ -172,7 +171,7 @@ evalstring(char *s, int flags)
 
 	status = 0;
 	while ((n = parsecmd(0)) != NEOF) {
-		evaltree(n, flags);
+		evaltree(n, flags, NULL);
 		status = exitstatus;
 		popstackmark(&smark);
 		if (evalskip)
@@ -191,14 +190,14 @@ evalstring(char *s, int flags)
  */
 
 void
-evaltree(union node *n, int flags)
+evaltree(union node *n, int flags, struct dg_list *dgraph_node)
 {
 	int checkexit = 0;
 	void (*evalfn)(union node *, int);
 	unsigned isor;
 	int status;
 	if (n == NULL) {
-		TRACE(("evaltree(NULL) called\n"));
+		//TRACE(("evaltree(NULL) called\n"));
 		goto out;
 	}
 #ifndef SMALL
@@ -216,14 +215,14 @@ evaltree(union node *n, int flags)
 		break;
 #endif
 	case NNOT:
-		evaltree(n->nnot.com, EV_TESTED);
+		evaltree(n->nnot.com, EV_TESTED, NULL);
 		status = !exitstatus;
 		goto setstatus;
 	case NREDIR:
 		expredir(n->nredir.redirect);
 		status = redirectsafe(n->nredir.redirect, REDIR_PUSH);
 		if (!status) {
-			evaltree(n->nredir.n, flags & EV_TESTED);
+			evaltree(n->nredir.n, flags & EV_TESTED, NULL);
 			status = exitstatus;
 		}
 		popredir(0);
@@ -251,7 +250,7 @@ checkexit:
 	case NSUBSHELL:
 	case NBACKGND:
 		evalfn = evalsubshell;
-		goto calleval;
+		evalsubshell (n, flags, dgraph_node);
 	case NPIPE:
 		evalfn = evalpipe;
 #ifdef notyet
@@ -276,21 +275,23 @@ checkexit:
 		isor = n->type - NAND;
 		evaltree(
 			n->nbinary.ch1,
-			(flags | ((isor >> 1) - 1)) & EV_TESTED
+			(flags | ((isor >> 1) - 1)) & EV_TESTED,
+			NULL
 		);
 		if (!exitstatus == isor)
 			break;
 		if (!evalskip) {
 			n = n->nbinary.ch2;
 evaln:
-			evalfn = evaltree;
+			evaltree(n, flags, NULL);
+			break;
 calleval:
 			evalfn(n, flags);
 			break;
 		}
 		break;
 	case NIF:
-		evaltree(n->nif.test, EV_TESTED);
+		evaltree(n->nif.test, EV_TESTED, NULL);
 		if (evalskip)
 			break;
 		if (exitstatus == 0) {
@@ -325,7 +326,8 @@ void evaltreenr(union node *n, int flags)
 	__attribute__ ((alias("evaltree")));
 #else
 {
-	evaltree(n, flags);
+	evaltree(n, flags, NULL);
+TRACE(("EVALTREENR abort\n"));
 	abort();
 }
 #endif
@@ -342,7 +344,7 @@ evalloop(union node *n, int flags)
 	for (;;) {
 		int i;
 
-		evaltree(n->nbinary.ch1, EV_TESTED);
+		evaltree(n->nbinary.ch1, EV_TESTED, NULL);
 		if (evalskip) {
 skipping:	  if (evalskip == SKIPCONT && --skipcount <= 0) {
 				evalskip = 0;
@@ -357,7 +359,7 @@ skipping:	  if (evalskip == SKIPCONT && --skipcount <= 0) {
 			i = !i;
 		if (i != 0)
 			break;
-		evaltree(n->nbinary.ch2, flags);
+		evaltree(n->nbinary.ch2, flags, NULL);
 		status = exitstatus;
 		if (evalskip)
 			goto skipping;
@@ -391,7 +393,7 @@ evalfor(union node *n, int flags)
 	flags &= EV_TESTED;
 	for (sp = arglist.list ; sp ; sp = sp->next) {
 		setvar(n->nfor.var, sp->text, 0);
-		evaltree(n->nfor.body, flags);
+		evaltree(n->nfor.body, flags, NULL);
 		if (evalskip) {
 			if (evalskip == SKIPCONT && --skipcount <= 0) {
 				evalskip = 0;
@@ -425,7 +427,7 @@ evalcase(union node *n, int flags)
 		for (patp = cp->nclist.pattern ; patp ; patp = patp->narg.next) {
 			if (casematch(patp, arglist.list->text)) {
 				if (evalskip == 0) {
-					evaltree(cp->nclist.body, flags);
+					evaltree(cp->nclist.body, flags, NULL);
 				}
 				goto out;
 			}
@@ -442,7 +444,7 @@ out:
  */
 
 STATIC void
-evalsubshell(union node *n, int flags)
+evalsubshell(union node *n, int flags, struct dg_list *dgraph_node)
 {
 	struct job *jp;
 	int backgnd = (n->type == NBACKGND);
@@ -452,7 +454,7 @@ evalsubshell(union node *n, int flags)
 	if (!backgnd && flags & EV_EXIT && !trap[0])
 		goto nofork;
 	INTOFF;
-	jp = makejob(n, 1);
+	jp = makejob(n, 1, dgraph_node);
 	if (forkshell(jp, n, backgnd) == 0) {
 		INTON;
 		flags |= EV_EXIT;
@@ -527,7 +529,7 @@ evalpipe(union node *n, int flags)
 		pipelen++;
 	flags |= EV_EXIT;
 	INTOFF;
-	jp = makejob(n, pipelen);
+	jp = makejob(n, pipelen, NULL);
 	prevfd = -1;
 	for (lp = n->npipe.cmdlist ; lp ; lp = lp->next) {
 		prehash(lp->n);
@@ -616,7 +618,7 @@ evalbackcmd(union node *n, struct backcmd *result)
 
 		if (pipe(pip) < 0)
 			sh_error("Pipe call failed");
-		jp = makejob(n, 1);
+		jp = makejob(n, 1, NULL);
 		if (forkshell(jp, n, FORK_NOJOB) == 0) {
 			FORCEINTON;
 			close(pip[0]);
@@ -830,7 +832,7 @@ bail:
 		/* Fork off a child process if necessary. */
 		if (!(flags & EV_EXIT) || trap[0]) {
 			INTOFF;
-			jp = makejob(cmd, 1);
+			jp = makejob(cmd, 1, NULL);
 			if (forkshell(jp, cmd, FORK_FG) != 0) {
 				exitstatus = waitforjob(jp);
 				INTON;
@@ -949,7 +951,7 @@ evalfun(struct funcnode *func, int argc, char **argv, int flags)
 	shellparam.p = argv + 1;
 	shellparam.optind = 1;
 	shellparam.optoff = -1;
-	evaltree(&func->n, flags & EV_TESTED);
+	evaltree(&func->n, flags & EV_TESTED, NULL);
 funcdone:
 	INTOFF;
 	funcnest--;
