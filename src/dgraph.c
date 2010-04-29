@@ -34,6 +34,7 @@ static void dg_graph_remove (struct dg_node *);
 static void dg_frontier_add (struct dg_node *);
 void dg_frontier_remove (struct dg_list *);
 void dg_frontier_run ();
+static void free_command (union node *);
 
 
 static struct dg_frontier *frontier;
@@ -147,6 +148,7 @@ TRACE(("DG GRAPH REMOVE\n"));
       iter = iter->next;
     }
 
+//  free_command (graph_node->command);
   free (graph_node->dependents);
   free (graph_node->files);
   free (graph_node);
@@ -400,4 +402,115 @@ TRACE (("DG_FRONTIER_REMOVE\n"));
 
   dg_graph_remove (rem->node);
   free (rem);
+}
+
+
+/* Free node tree returned by parsecmd. */
+static void
+free_command (union node *node)
+{
+return;
+  switch (node->type) {
+  case NCMD:
+    if (node->ncmd.assign)
+      free_command (node->ncmd.assign);
+    if (node->ncmd.args)
+      free_command (node->ncmd.args);
+    if (node->ncmd.redirect)
+      free_command (node->ncmd.redirect);
+    break;
+  case NPIPE:
+    if (node->npipe.cmdlist)
+      ;/*TODO: free nodelist. */
+  case NREDIR:
+  case NBACKGND:
+  case NSUBSHELL:
+    if (node->nredir.n)
+      free_command (node->nredir.n);
+    if (node->nredir.redirect)
+      free_command (node->nredir.redirect);
+    break;
+  case NAND:
+  case NOR:
+  case NSEMI:
+  case NWHILE:
+  case NUNTIL:
+    if (node->nbinary.ch1)
+      free_command (node->nbinary.ch1);
+    if (node->nbinary.ch2)
+      free_command (node->nbinary.ch2);
+    break;
+  case NIF:
+    if (node->nif.test)
+      free_command (node->nif.test);
+    if (node->nif.ifpart)
+      free_command (node->nif.ifpart);
+    if (node->nif.elsepart)
+      free_command (node->nif.elsepart);
+    break;
+  case NFOR:
+    if (node->nfor.args)
+      free_command (node->nfor.args);
+    if (node->nfor.body)
+      free_command (node->nfor.body);
+    if (node->nfor.var)
+      free (node->nfor.var);
+    break;
+  case NCASE:
+    if (node->ncase.expr)
+      free_command (node->ncase.expr);
+    if (node->ncase.cases)
+      free_command (node->ncase.cases);
+    break;
+  case NCLIST:
+    if (node->nclist.next)
+      free_command (node->nclist.next);
+    if (node->nclist.pattern)
+      free_command (node->nclist.pattern);
+    if (node->nclist.body)
+      free_command (node->nclist.body);
+    break;
+  case NDEFUN:
+  case NARG:
+    if (node->narg.next)
+      free_command (node->narg.next);
+    if (node->narg.text)
+      free (node->narg.text);
+    if (node->narg.backquote)
+      ;/* TODO: free nodelist. */
+    break; 
+  case NTO:
+  case NCLOBBER:
+  case NFROM:
+  case NFROMTO:
+  case NAPPEND:
+    if (node->nfile.next)
+      free_command (node->nfile.next);
+    if (node->nfile.fname)
+      free_command (node->nfile.fname);
+    if (node->nfile.expfname)
+      free (node->nfile.expfname);
+    break;
+  case NTOFD:
+  case NFROMFD:
+    if (node->ndup.next)
+      free_command (node->ndup.next);
+    if (node->ndup.vname)
+      free_command (node->ndup.vname);
+    break;
+  case NHERE:
+  case NXHERE:
+    if (node->nhere.next);
+      free_command (node->nhere.next);
+    if (node->nhere.doc)
+      free_command (node->nhere.doc);
+    break;
+  case NNOT:
+    if (node->nnot.com)
+      free_command (node->nnot.com);
+    break;
+  default:
+    break;
+  }
+  free (node);
 }

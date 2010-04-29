@@ -113,6 +113,7 @@ char *sstrend = stackbase.space + MINSIZE;
 pointer
 stalloc(size_t nbytes)
 {
+TRACE(("STALLOC\n"));
 	char *p;
 	size_t aligned;
 
@@ -177,7 +178,6 @@ void setstackmark(struct stackmark *mark)
 void
 popstackmark(struct stackmark *mark)
 {
-return;
 	struct stack_block *sp;
 
 	INTOFF;

@@ -207,6 +207,7 @@ cmdloop(int top)
 	union node *n;
 	pthread_t thread;
 	int numeof = 0;
+	struct stackmark smark;
 	struct dg_list *frontier_node;
 
 	TRACE(("cmdloop(%d) called\n", &top));
@@ -215,9 +216,10 @@ cmdloop(int top)
 		hetio_init();
 #endif
 
+	setstackmark(&smark);
+
 	dg_graph_init();
 	pthread_create (&thread, NULL, parseloop, (void *) &top);
-
 
 	while (1) {
 		/* jobs MUST be on, since that's the only mechanism dash provides for
@@ -228,17 +230,13 @@ cmdloop(int top)
 		dg_graph_lock ();
 		frontier_node = dg_graph_run ();
 		dg_graph_unlock ();
-		if (frontier_node) {	
+		if (frontier_node)	
 			n = frontier_node->node->command;
-			TRACE(("CMDLOOP: type %d, \n", n->type));
-//			TRACE(("CMDLOOP: n %p redir %p, args %p, args2 %p, args3 %p\n", n, n->nredir.n, n->nredir.n->ncmd.args,
-//                                n->nredir.n->ncmd.args->narg.next, n->nredir.n->ncmd.args->narg.next->narg.next));
-		} else
+		else
 			n = NULL;
 
 		/* showtree(n); DEBUG */
 		if (n == NEOF) {
-TRACE(("NEOF\n"));
 			if (!top || numeof >= 50)
 				break;
 			if (!stoppedjobs()) {
@@ -253,6 +251,7 @@ TRACE(("NEOF\n"));
 			evaltree(n, 0, frontier_node);
 		}
 	}
+	popstackmark(&smark);
 	/* TODO: Make sure created threads exit. */
 
 	return 0;
@@ -262,7 +261,6 @@ TRACE(("NEOF\n"));
 static void *
 parseloop (void *topp)
 {
-	struct stackmark smark;
 	int inter;
 	int top = *(int *) topp;
 	union node *n;
@@ -272,7 +270,6 @@ parseloop (void *topp)
 	for (;;) {
 		int skip;
 
-		setstackmark(&smark);
 		inter = 0;
 		if (iflag && top) {
 			inter++;
@@ -288,7 +285,6 @@ parseloop (void *topp)
 			if (n == NEOF)
 				break;
 		}
-		popstackmark(&smark);
 
 		skip = evalskip;
 		if (skip) {
