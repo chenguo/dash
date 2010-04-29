@@ -9,6 +9,7 @@
 #include "memalloc.h"
 #include "nodes.h"
 #include "show.h"
+#include "parser.h"
 
 /* Implementation is a directed graph, nodes representing a
    running command points to commands that much wait for the
@@ -193,9 +194,16 @@ dg_dep_add (struct dg_node *new_node, struct dg_node *node)
 {
 TRACE(("DG DEP ADD\n"));
   /* Establish dependency. */
-  int file_access = dg_file_check (new_node, node);
-  if (file_access == NO_CLASH)
-    return 0;
+  int file_access;
+
+  if (new_node->command == NEOF)
+    file_access = WRITE_COLLISION;
+  else
+    {
+      file_access = dg_file_check (new_node, node);
+      if (file_access == NO_CLASH)
+        return 0;
+    }
 
   int deps = 0;
   struct dg_list *iter = node->dependents;
@@ -248,12 +256,17 @@ TRACE(("DG NODE CREATE %i\n", new_cmd->type));
   struct dg_node *new_node = malloc (sizeof *new_node);
   new_node->dependents = NULL;
 
-  union node *flist = new_cmd->nredir.n->ncmd.redirect;
+  if (new_cmd->type == NBACKGND)
+    {
+      union node *flist = new_cmd->nredir.n->ncmd.redirect;
 
-  new_node->files = dg_node_files (flist);
+      new_node->files = dg_node_files (flist);
+    }
+  else 
+    ;/* Other node types, such as loops, not yet supported. */
+
   new_node->dependencies = 0;
   new_node->command = new_cmd;
-
 //TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
 //        new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
 //        new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
@@ -364,6 +377,10 @@ void
 dg_frontier_remove (struct dg_list *rem)
 {
 TRACE (("DG_FRONTIER_REMOVE\n"));
+
+  /* Do NOT remove EOF from frontier. */
+  if (rem->node->command == NEOF)
+    return;
 
   if (rem->prev)
     {

@@ -209,9 +209,6 @@ cmdloop(int top)
 	int numeof = 0;
 	struct dg_list *frontier_node;
 
-	struct stackmark smark;
-	int inter;
-
 	TRACE(("cmdloop(%d) called\n", &top));
 #ifdef HETIO
 	if(iflag && top)
@@ -223,31 +220,17 @@ cmdloop(int top)
 
 
 	while (1) {
-//		int skip;
-//		setstackmark(&smark);
-		if (jobctl)
-			showjobs(out2, SHOW_CHANGED);
-/*		inter = 0;
-		if (iflag && top) {
-			inter++;
-			chkmail();
-		}
-
-		n = parsecmd(inter);
-		if (n) {
-			TRACE(("Nodetype: %i\n", n->type));
-			dg_graph_lock ();
-			dg_graph_add (n);
-			dg_graph_unlock ();
-		}
-*/
+		/* jobs MUST be on, since that's the only mechanism dash provides for
+		   knowning when a command finished. */
+		//if (jobctl)
+		showjobs(out2, SHOW_CHANGED);
 
 		dg_graph_lock ();
 		frontier_node = dg_graph_run ();
 		dg_graph_unlock ();
 		if (frontier_node) {	
 			n = frontier_node->node->command;
-			TRACE(("CMDLOOP: type %d\n", n->type));
+			TRACE(("CMDLOOP: type %d, \n", n->type));
 //			TRACE(("CMDLOOP: n %p redir %p, args %p, args2 %p, args3 %p\n", n, n->nredir.n, n->nredir.n->ncmd.args,
 //                                n->nredir.n->ncmd.args->narg.next, n->nredir.n->ncmd.args->narg.next->narg.next));
 		} else
@@ -255,6 +238,7 @@ cmdloop(int top)
 
 		/* showtree(n); DEBUG */
 		if (n == NEOF) {
+TRACE(("NEOF\n"));
 			if (!top || numeof >= 50)
 				break;
 			if (!stoppedjobs()) {
@@ -268,15 +252,8 @@ cmdloop(int top)
 			numeof = 0;
 			evaltree(n, 0, frontier_node);
 		}
-
-//		popstackmark(&smark);
-
-/*		skip = evalskip;
-		if (skip) {
-			evalskip = 0;
-			break;
-		}
-*/	}
+	}
+	/* TODO: Make sure created threads exit. */
 
 	return 0;
 }
@@ -296,8 +273,6 @@ parseloop (void *topp)
 		int skip;
 
 		setstackmark(&smark);
-//		if (jobctl)
-//			showjobs(out2, SHOW_CHANGED);
 		inter = 0;
 		if (iflag && top) {
 			inter++;
@@ -310,6 +285,8 @@ parseloop (void *topp)
 			dg_graph_lock ();
 			dg_graph_add (n);
 			dg_graph_unlock ();
+			if (n == NEOF)
+				break;
 		}
 		popstackmark(&smark);
 
@@ -320,6 +297,7 @@ parseloop (void *topp)
 		}
 	}
 
+	TRACE(("PARSELOOP return.\n"));
 	return NULL;
 }
 
