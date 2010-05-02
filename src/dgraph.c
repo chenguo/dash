@@ -148,7 +148,7 @@ TRACE(("DG GRAPH REMOVE\n"));
       iter = iter->next;
     }
 
-//  free_command (graph_node->command);
+  free_command (graph_node->command);
   free (graph_node->dependents);
   free (graph_node->files);
   free (graph_node);
@@ -409,9 +409,9 @@ TRACE (("DG_FRONTIER_REMOVE\n"));
 static void
 free_command (union node *node)
 {
-return;
   switch (node->type) {
   case NCMD:
+    TRACE(("FREE_COMMAND: NCMD\n"));
     if (node->ncmd.assign)
       free_command (node->ncmd.assign);
     if (node->ncmd.args)
@@ -425,6 +425,7 @@ return;
   case NREDIR:
   case NBACKGND:
   case NSUBSHELL:
+    TRACE(("FREE_COMMAND: NREDIR\n"));
     if (node->nredir.n)
       free_command (node->nredir.n);
     if (node->nredir.redirect)
@@ -472,6 +473,7 @@ return;
     break;
   case NDEFUN:
   case NARG:
+    TRACE(("FREE_COMMAND: NARG\n"));
     if (node->narg.next)
       free_command (node->narg.next);
     if (node->narg.text)

@@ -558,18 +558,39 @@ out:
 	*app = NULL;
 	*vpp = NULL;
 	*rpp = NULL;
+
+	/* For most commands, we wrap as NBACKGND. */
+	int wrap = 1;
 	n = (union node *)malloc(sizeof (struct ncmd));
 	n->type = NCMD;
-	n->ncmd.args = (union node *)malloc (sizeof (struct narg));
-	*n->ncmd.args = *args;
+        if (args) {
+		n->ncmd.args = (union node *)malloc (sizeof (struct narg));
+		*n->ncmd.args = *args;
+		if (args->narg.text) {
+			TRACE(("NCMD: %s\n", args->narg.text));
+			/* Check for commands we do NOT backgound on. This
+			   includes: cd, exit, shell variables?
+			   TODO: think of more. */
+			if (strcmp (args->narg.text, "cd") == 0
+			    || strcmp (args->narg.text, "exit") == 0)
+				wrap = 0;
 
+		}
+	}
+	else
+		n->ncmd.args = NULL;
 	n->ncmd.assign = vars;
 	n->ncmd.redirect = redir;
-	union node *nwrap = (union node *) malloc(sizeof (struct nredir));
-        nwrap->type = NBACKGND;
-	nwrap->nredir.n = n;
-	nwrap->nredir.redirect = NULL;
-	return nwrap;
+
+	if (wrap) {
+		union node *nwrap = (union node *) malloc(sizeof (struct nredir));
+		nwrap->type = NBACKGND;
+		nwrap->nredir.n = n;
+		nwrap->nredir.redirect = NULL;
+		n = nwrap;
+	}
+
+	return n;
 }
 
 STATIC union node *
@@ -1035,7 +1056,10 @@ endword:
 	quoteflag = quotef;
 	backquotelist = bqlist;
 	grabstackblock(len);
-	wordtext = out;
+
+	/* Copy out to wordtext. TODO: free the stack space. */
+	wordtext = malloc (len);
+	strncpy (wordtext, out, len);
 	return lasttoken = TWORD;
 /* end of readtoken routine */
 

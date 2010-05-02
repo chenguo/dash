@@ -176,6 +176,7 @@ initvar(void)
 void
 setvar(const char *name, const char *val, int flags)
 {
+TRACE(("SETVAR name %s val %s\n", name, val));
 	char *p, *q;
 	size_t namelen;
 	char *nameeq;

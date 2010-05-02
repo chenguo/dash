@@ -847,6 +847,7 @@ bail:
 	case CMDBUILTIN:
 		cmdenviron = varlist.list;
 		if (cmdenviron) {
+TRACE(("CMDENVIRON\n"));
 			struct strlist *list = cmdenviron;
 			int i = VNOSET;
 			if (spclbltin > 0 || argc == 0) {
@@ -896,6 +897,7 @@ out:
 STATIC int
 evalbltin(const struct builtincmd *cmd, int argc, char **argv, int flags)
 {
+TRACE(("Evalbltin\n"));
 	char *volatile savecmdname;
 	struct jmploc *volatile savehandler;
 	struct jmploc jmploc;

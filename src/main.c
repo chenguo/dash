@@ -277,14 +277,16 @@ parseloop (void *topp)
 		}
 
 		n = parsecmd(inter);
-		if (n) {
+		if (n->type != NCMD) {
 			TRACE(("Nodetype: %i\n", n->type));
 			dg_graph_lock ();
 			dg_graph_add (n);
 			dg_graph_unlock ();
 			if (n == NEOF)
 				break;
-		}
+		} else
+			/* NCMD only gets returned now on cd and exit. */
+			evaltree (n, 0, NULL);
 
 		skip = evalskip;
 		if (skip) {
