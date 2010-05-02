@@ -277,7 +277,7 @@ parseloop (void *topp)
 		}
 
 		n = parsecmd(inter);
-		if (n->type != NCMD) {
+		if (n->type != NCMD || n == NEOF) {
 			TRACE(("Nodetype: %i\n", n->type));
 			dg_graph_lock ();
 			dg_graph_add (n);
