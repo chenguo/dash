@@ -110,7 +110,7 @@ STATIC int readtoken1(int, char const *, char *, int);
 STATIC void synexpect(int) __attribute__((__noreturn__));
 STATIC void synerror(const char *) __attribute__((__noreturn__));
 STATIC void setprompt(int);
-
+STATIC char *copyfromstack (char *);
 
 static inline int
 isassignment(const char *p)
@@ -508,7 +508,7 @@ simplecmd(void) {
 		case TWORD:
 			n = (union node *)malloc(sizeof (struct narg));
 			n->type = NARG;
-			n->narg.text = wordtext;
+			n->narg.text = copyfromstack (wordtext);
 			n->narg.backquote = backquotelist;
 			if (savecheckkwd && isassignment(wordtext)) {
 				*vpp = n;
@@ -601,7 +601,7 @@ makename(void)
 	n = (union node *)malloc(sizeof (struct narg));
 	n->type = NARG;
 	n->narg.next = NULL;
-	n->narg.text = wordtext;
+	n->narg.text = copyfromstack (wordtext);
 	n->narg.backquote = backquotelist;
 	TRACE(("File name %s\n", n->narg.text));
 	return n;
@@ -1056,10 +1056,7 @@ endword:
 	quoteflag = quotef;
 	backquotelist = bqlist;
 	grabstackblock(len);
-
-	/* Copy out to wordtext. TODO: free the stack space. */
-	wordtext = malloc (len);
-	strncpy (wordtext, out, len);
+	wordtext = out;
 	return lasttoken = TWORD;
 /* end of readtoken routine */
 
@@ -1529,6 +1526,18 @@ setprompt(int which)
 		out2str(getprompt(NULL));
 		popstackmark(&smark);
 	}
+}
+
+/* Copy a string off the stack into malloc'd memory, so we can free it when
+   freeing the node. */
+STATIC char *
+copyfromstack (char *src)
+{
+TRACE(("COPYFROMSTACK %s\n", src));
+	int len = strlen (src) + 1;
+	char *r = malloc (len);
+	strncpy (r, src, len);
+	return r;
 }
 
 const char *

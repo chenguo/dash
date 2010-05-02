@@ -475,9 +475,15 @@ free_command (union node *node)
   case NARG:
     TRACE(("FREE_COMMAND: NARG\n"));
     if (node->narg.next)
+{
+	TRACE(("FREE_COMMAND: NARG: next\n"));
       free_command (node->narg.next);
+}
     if (node->narg.text)
+{
+	TRACE(("FREE_COMMAND: NARG: text %s\n", node->narg.text));
       free (node->narg.text);
+}
     if (node->narg.backquote)
       ;/* TODO: free nodelist. */
     break; 
@@ -486,13 +492,20 @@ free_command (union node *node)
   case NFROM:
   case NFROMTO:
   case NAPPEND:
+    TRACE(("FREE_COMMAND: NFILE\n"));
     if (node->nfile.next)
+{
+      TRACE(("FREE_COMMAND: NFILE: next\n"));
       free_command (node->nfile.next);
+}
     if (node->nfile.fname)
+{
+      TRACE(("FREE_COMMAND: NFILE: fname %p\n", node->nfile.fname));
       free_command (node->nfile.fname);
+}
     if (node->nfile.expfname)
-      free (node->nfile.expfname);
-    break;
+      ;/* Taken care of by eval. */
+   break;
   case NTOFD:
   case NFROMFD:
     if (node->ndup.next)
