@@ -33,6 +33,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -81,7 +82,14 @@ STATIC void read_profile(const char *);
 STATIC char *find_dot_file(char *);
 static int cmdloop(int);
 static void *parseloop(void *);
+static void *evaltree_thread(void *);
 int main(int, char **);
+
+struct et_args
+{
+	union node* node;
+	struct dg_list* fnode;
+};
 
 /*
  * Main routine.  We initialize things, parse the arguments, execute
@@ -248,7 +256,18 @@ cmdloop(int top)
 		} else if (nflag == 0) {
 			job_warning = (job_warning == 2) ? 1 : 0;
 			numeof = 0;
-			evaltree(n, 0, frontier_node);
+			if (!n || n->type != NVAR)
+				evaltree(n, 0, frontier_node);
+			else {
+				TRACE(("NVAR\n"));
+				pthread_t thread;
+				struct et_args *args = malloc (sizeof *args);
+				args->node = n->nvar.com;
+				args->fnode = frontier_node;
+				pthread_create (&thread, NULL, evaltree_thread,
+						args);
+				pthread_detach (thread);
+			}
 		}
 	}
 	popstackmark(&smark);
@@ -276,7 +295,58 @@ parseloop (void *topp)
 			chkmail();
 		}
 
+		/* parsecmd returns a node. Wrap decides whether or not
+		   to wrap it with NBACKGND. */
 		n = parsecmd(inter);
+		TRACE(("PARSELOOP: parsecmd ret\n"));
+
+		/* parsecmd returns a NCMD. Background it? */
+		int wrap = 0;
+		if (n != NEOF && n->type == NCMD) {
+			if (n->ncmd.args && n->ncmd.args->narg.text) {
+				TRACE(("NCMD: ARGS %s\n", n->ncmd.args->narg.text));
+
+				/* Check for commands we do NOT backgound on.
+				   This includes: cd and exit.
+				   TODO: think of more. */
+				if (strcmp (n->ncmd.args->narg.text, "cd") == 0
+				    || strcmp (n->ncmd.args->narg.text, "exit") == 0)
+					wrap = 0;
+				else
+					wrap = 1;
+			} else if (n->ncmd.assign && n->ncmd.assign->narg.text) {
+				TRACE(("NCMD: ASSIGN next %p\n", n->ncmd.assign->narg.next));
+				TRACE(("NCMD: ASSIGN text %s\n", n->ncmd.assign->narg.text));
+				TRACE(("NCMD: ASSIGN bqte %p\n", n->ncmd.assign->narg.backquote));
+				struct nodelist *tmp = n->ncmd.assign->narg.backquote;
+				while (tmp) {
+					TRACE(("NODELIST: type %d\n", tmp->n->type));
+					if (tmp->n->type == NCMD) {
+						TRACE(("NCMD: ARGS text %s\n", tmp->n->ncmd.args->narg.text));
+						
+					}
+					tmp = tmp->next;
+				}
+				wrap = 2;
+			}
+		} else
+			wrap = 0;
+
+		if (wrap == 1) {
+			TRACE(("Wrapping with NBACKGND\n"));
+			union node *nwrap = (union node *) malloc (sizeof (struct nredir));
+			nwrap->type = NBACKGND;
+			nwrap->nredir.n = n;
+			nwrap->nredir.redirect = NULL;
+			n = nwrap;
+		} else if (wrap == 2) {
+			TRACE(("Wrapping with NVAR\n"));
+			union node *nwrap = (union node *) malloc (sizeof (struct nvar));
+			nwrap->type = NVAR;	
+			nwrap->nvar.com = n;
+			n = nwrap;
+		}
+
 		if (n->type != NCMD || n == NEOF) {
 			TRACE(("Nodetype: %i\n", n->type));
 			dg_graph_lock ();
@@ -285,7 +355,7 @@ parseloop (void *topp)
 			if (n == NEOF)
 				break;
 		} else
-			/* NCMD only gets returned now on cd and exit. */
+			/* NCMD: for now, only cd and exit. */
 			evaltree (n, 0, NULL);
 
 		skip = evalskip;
@@ -296,6 +366,18 @@ parseloop (void *topp)
 	}
 
 	TRACE(("PARSELOOP return.\n"));
+	return NULL;
+}
+
+
+/* Call evaltree in a thread. */
+static void *
+evaltree_thread (void *data)
+{
+	struct et_args *arg = (struct et_args *) data;
+	evaltree (arg->node, 0, arg->fnode);
+	free (data);
+
 	return NULL;
 }
 

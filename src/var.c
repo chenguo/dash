@@ -270,6 +270,7 @@ setvareq(char *s, int flags)
 	if (!(flags & (VTEXTFIXED|VSTACK|VNOSAVE)))
 		s = savestr(s);
 	vp->text = s;
+TRACE(("SETVAREQ: var: %s\n", s));
 	vp->flags = flags;
 }
 

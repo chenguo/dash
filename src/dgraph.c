@@ -54,7 +54,7 @@ enum {
 void
 dg_graph_init (void)
 {
-TRACE(("DG GRAPH INIT\n"));
+  TRACE(("DG GRAPH INIT\n"));
   frontier = malloc (sizeof *frontier);
   frontier->run_list = NULL;
   frontier->run_next = NULL;
@@ -81,7 +81,7 @@ dg_graph_unlock(void) {
 struct dg_list *
 dg_graph_run (void)
 {
-//TRACE(("DG GRAPH RUN\n"));
+  //TRACE(("DG GRAPH RUN\n"));
   if (frontier->run_next)
     {
       struct dg_list *ret = frontier->run_next;
@@ -97,10 +97,10 @@ dg_graph_run (void)
 void
 dg_graph_add (union node *new_cmd)
 {
-TRACE(("DG GRAPH ADD\n"));
-//TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
-//        new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
-//        new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
+  TRACE(("DG GRAPH ADD\n"));
+  //TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
+  //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
+  //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
 
   /* Create a node for this command. */
   struct dg_node *new_node = dg_node_create (new_cmd);
@@ -116,10 +116,10 @@ TRACE(("DG GRAPH ADD\n"));
       /* Increment to next frontier node. */
       iter = iter->next;
     }
-TRACE(("DG GRAPH ADD: deps %d\n", new_node->dependencies));
-//TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
-//        new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
-//        new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
+  TRACE(("DG GRAPH ADD: deps %d\n", new_node->dependencies));
+  //TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
+  //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
+  //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
 
   /* If no file access dependencies, this is a frontier node. */
   if (new_node->dependencies == 0)
@@ -133,7 +133,7 @@ TRACE(("DG GRAPH ADD: deps %d\n", new_node->dependencies));
 static void
 dg_graph_remove (struct dg_node *graph_node)
 {
-TRACE(("DG GRAPH REMOVE\n"));
+  TRACE(("DG GRAPH REMOVE\n"));
   /* Step through dependents. */
   struct dg_list *iter = graph_node->dependents;
   while (iter)
@@ -159,7 +159,7 @@ TRACE(("DG GRAPH REMOVE\n"));
 static int
 dg_file_check (struct dg_node *node1, struct dg_node *node2)
 {
-TRACE(("DG FILE CHECK\n"));
+  TRACE(("DG FILE CHECK\n"));
   struct dg_file *files1 = node1->files;
   struct dg_file *files2 = node2->files;
 
@@ -168,7 +168,7 @@ TRACE(("DG FILE CHECK\n"));
     {
       while (files2)
         {
-TRACE(("CHECKING %s and %s\n", files1->file, files2->file));
+  TRACE(("CHECKING %s and %s\n", files1->file, files2->file));
           /* If same file is accessed. */
           if (strcmp (files1->file, files2->file) == 0)
             {
@@ -183,7 +183,7 @@ TRACE(("CHECKING %s and %s\n", files1->file, files2->file));
       files2 = node2->files;
     }
   /* Either no files in common or concurrent read. */
-TRACE(("DG FILE CHECK ret %d\n", mult_read));
+  TRACE(("DG FILE CHECK ret %d\n", mult_read));
   return mult_read;
 }
 
@@ -194,7 +194,7 @@ TRACE(("DG FILE CHECK ret %d\n", mult_read));
 static int
 dg_dep_add (struct dg_node *new_node, struct dg_node *node)
 {
-TRACE(("DG DEP ADD\n"));
+  TRACE(("DG DEP ADD\n"));
   /* Establish dependency. */
   int file_access;
 
@@ -251,10 +251,10 @@ TRACE(("DG DEP ADD\n"));
 static struct dg_node *
 dg_node_create (union node *new_cmd)
 {
-TRACE(("DG NODE CREATE %i\n", new_cmd->type));
-//TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
-//        new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
-//        new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
+  TRACE(("DG NODE CREATE %i\n", new_cmd->type));
+  //TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
+  //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
+  //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
   struct dg_node *new_node = malloc (sizeof *new_node);
   new_node->dependents = NULL;
 
@@ -269,9 +269,9 @@ TRACE(("DG NODE CREATE %i\n", new_cmd->type));
 
   new_node->dependencies = 0;
   new_node->command = new_cmd;
-//TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
-//        new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
-//        new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
+  //TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
+  //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
+  //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
   return new_node;
 }
 
@@ -280,7 +280,7 @@ TRACE(("DG NODE CREATE %i\n", new_cmd->type));
 static struct dg_file *
 dg_node_files (union node *redir)
 {
-TRACE(("DG NODE FILES\n"));
+  TRACE(("DG NODE FILES\n"));
   if (!redir)
     return NULL;
 
@@ -293,7 +293,7 @@ TRACE(("DG NODE FILES\n"));
       iter->file = malloc (iter->name_size);
       strncpy (iter->file, file, strlen (file));
       iter->file[iter->name_size - 1] = '\0';
-TRACE(("DG NODE FILES: %s\n", iter->file));
+      TRACE(("DG NODE FILES: %s\n", iter->file));
 
       /* Only handle these for now. */
       if (redir->type == NFROM)
@@ -322,11 +322,11 @@ TRACE(("DG NODE FILES: %s\n", iter->file));
 static void
 dg_frontier_add (struct dg_node *graph_node)
 {
-TRACE(("DG FRONTIER ADD\n"));
-//union node* new_cmd = graph_node->command;
-//TRACE(("DG FRONTIER ADD n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
-//        new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
-//        new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
+  TRACE(("DG FRONTIER ADD\n"));
+  //union node* new_cmd = graph_node->command;
+  //TRACE(("DG FRONTIER ADD n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
+  //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
+  //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
 
   /* Allocate new runnables node. */
   struct dg_list *new_tail = malloc (sizeof *new_tail);
@@ -334,9 +334,9 @@ TRACE(("DG FRONTIER ADD\n"));
   if (frontier->tail)
     {
       TRACE(("DG FRONTIER ADD non-empty\n"));
-//TRACE(("DG FRONTIER ADD n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
-//        new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
-//        new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
+      //TRACE(("DG FRONTIER ADD n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
+      //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
+      //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
       /* Add new tail to LL. */
       frontier->tail->next = new_tail;
 
@@ -352,10 +352,10 @@ TRACE(("DG FRONTIER ADD\n"));
     }
   else
     {
-TRACE(("DG FRONTIER ADD empty\n"));
-//TRACE(("DG FRONTIER ADD n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
-//        new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
-//        new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
+      TRACE(("DG FRONTIER ADD empty\n"));
+      //TRACE(("DG FRONTIER ADD n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
+      //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
+      //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
       /* Frontier is currently empty. */
       frontier->run_list = new_tail;
       frontier->run_next = new_tail;
@@ -368,9 +368,9 @@ TRACE(("DG FRONTIER ADD empty\n"));
   frontier->tail->next = NULL;
 
 
-//TRACE(("DG FRONTIER ADD n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
-//        new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
-//        new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
+  //TRACE(("DG FRONTIER ADD n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
+  //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
+  //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
 }
 
 /* Remove the runnables list node corresponding to a frontier
@@ -378,7 +378,7 @@ TRACE(("DG FRONTIER ADD empty\n"));
 void
 dg_frontier_remove (struct dg_list *rem)
 {
-TRACE (("DG_FRONTIER_REMOVE\n"));
+  TRACE (("DG_FRONTIER_REMOVE\n"));
 
   /* Do NOT remove EOF from frontier. */
   if (rem->node->command == NEOF)
@@ -475,15 +475,9 @@ free_command (union node *node)
   case NARG:
     TRACE(("FREE_COMMAND: NARG\n"));
     if (node->narg.next)
-{
-	TRACE(("FREE_COMMAND: NARG: next\n"));
       free_command (node->narg.next);
-}
     if (node->narg.text)
-{
-	TRACE(("FREE_COMMAND: NARG: text %s\n", node->narg.text));
       free (node->narg.text);
-}
     if (node->narg.backquote)
       ;/* TODO: free nodelist. */
     break; 
@@ -494,15 +488,9 @@ free_command (union node *node)
   case NAPPEND:
     TRACE(("FREE_COMMAND: NFILE\n"));
     if (node->nfile.next)
-{
-      TRACE(("FREE_COMMAND: NFILE: next\n"));
       free_command (node->nfile.next);
-}
     if (node->nfile.fname)
-{
-      TRACE(("FREE_COMMAND: NFILE: fname %p\n", node->nfile.fname));
       free_command (node->nfile.fname);
-}
     if (node->nfile.expfname)
       ;/* Taken care of by eval. */
    break;

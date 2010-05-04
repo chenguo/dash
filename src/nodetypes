@@ -55,6 +55,10 @@ NCMD ncmd			# a simple command
 	args	  nodeptr		# the arguments
 	redirect  nodeptr		# list of file redirections
 
+NVAR nvar			# a variable assignment
+	type	  int
+	com	  nodeptr		# assignment command
+
 NPIPE npipe			# a pipeline
 	type	  int
 	backgnd	  int			# set to run pipeline in background
