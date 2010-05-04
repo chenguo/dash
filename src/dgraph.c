@@ -60,6 +60,7 @@ dg_graph_init (void)
   frontier->run_next = NULL;
   frontier->tail = NULL;
   pthread_mutex_init (&frontier->dg_lock, NULL);
+  pthread_cond_init(&frontier->runnable, NULL);
 }
 
 
@@ -81,6 +82,10 @@ dg_graph_unlock(void) {
 struct dg_list *
 dg_graph_run (void)
 {
+  if (frontier->run_next == NULL) {
+    pthread_cond_wait(&frontier->runnable, &frontier->dg_lock);
+  }
+
   //TRACE(("DG GRAPH RUN\n"));
   if (frontier->run_next)
     {
@@ -124,6 +129,9 @@ dg_graph_add (union node *new_cmd)
   /* If no file access dependencies, this is a frontier node. */
   if (new_node->dependencies == 0)
     dg_frontier_add (new_node);
+
+  // Send a signal to wake up all blocked dg_run threads
+  pthread_cond_signal(&frontier->runnable);
 }
 
 
@@ -176,7 +184,7 @@ dg_file_check (struct dg_node *node1, struct dg_node *node2)
                 return WRITE_COLLISION;
              else
                 mult_read = CONCURRENT_READ;
-            } 
+            }
           files2 = files2->next;
         }
       files1 = files1->next;
@@ -264,7 +272,7 @@ dg_node_create (union node *new_cmd)
 
       new_node->files = dg_node_files (flist);
     }
-  else 
+  else
     ;/* Other node types, such as loops, not yet supported. */
 
   new_node->dependencies = 0;
@@ -344,7 +352,7 @@ dg_frontier_add (struct dg_node *graph_node)
       new_tail->prev = frontier->tail;
 
       /* Set tail to new tail. */
-      frontier->tail = frontier->tail->next; 
+      frontier->tail = frontier->tail->next;
 
       /* Set run next if not set. */
       if (!frontier->run_next)
@@ -480,7 +488,7 @@ free_command (union node *node)
       free (node->narg.text);
     if (node->narg.backquote)
       ;/* TODO: free nodelist. */
-    break; 
+    break;
   case NTO:
   case NCLOBBER:
   case NFROM:

@@ -23,7 +23,7 @@ struct dg_node
   struct dg_list *dependents;  /* Commands dependent on this one. */
   struct dg_file *files;       /* Files/vars this command reads/writes. */
   int dependencies;            /* Number of blocking commands. */
-  union node *command;         /* Command to evaluate. */   
+  union node *command;         /* Command to evaluate. */
 };
 
 
@@ -33,7 +33,8 @@ struct dg_frontier
   struct dg_list *run_list;    /* Running/runnable commands. */
   struct dg_list *run_next;    /* Next non-running runnable command. */
   struct dg_list *tail;        /* Last element in LL. */
-  pthread_mutex_t dg_lock;     /* Lock for directed grah. */
+  pthread_mutex_t dg_lock;     /* Lock for directed graph. */
+  pthread_cond_t runnable;     /* Run conditional variable */
 };
 
 void dg_graph_init (void);
