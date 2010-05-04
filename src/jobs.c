@@ -482,9 +482,7 @@ TRACE(("showjob called.\n"));
 		if (jp->state == JOBSTOPPED)
 			status = jp->stopstatus;
 		else {/* JOBDONE */
-			dg_graph_lock ();
 			dg_frontier_remove (jp->ps0.node);
-			dg_graph_unlock ();
 		}
 #endif
 		col += sprint_status(s + col, status, 0);

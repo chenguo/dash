@@ -235,10 +235,8 @@ cmdloop(int top)
 		//if (jobctl)
 		showjobs(out2, SHOW_CHANGED);
 
-		dg_graph_lock ();
-		frontier_node = dg_graph_run ();
-		dg_graph_unlock ();
-		if (frontier_node)	
+		frontier_node = dg_graph_run();
+		if (frontier_node)
 			n = frontier_node->node->command;
 		else
 			n = NULL;
@@ -256,8 +254,9 @@ cmdloop(int top)
 		} else if (nflag == 0) {
 			job_warning = (job_warning == 2) ? 1 : 0;
 			numeof = 0;
-			if (!n || n->type != NVAR)
+			if (!n || n->type != NVAR) {
 				evaltree(n, 0, frontier_node);
+			}
 			else {
 				TRACE(("NVAR\n"));
 				pthread_t thread;
@@ -323,7 +322,7 @@ parseloop (void *topp)
 					TRACE(("NODELIST: type %d\n", tmp->n->type));
 					if (tmp->n->type == NCMD) {
 						TRACE(("NCMD: ARGS text %s\n", tmp->n->ncmd.args->narg.text));
-						
+
 					}
 					tmp = tmp->next;
 				}
@@ -342,16 +341,14 @@ parseloop (void *topp)
 		} else if (wrap == 2) {
 			TRACE(("Wrapping with NVAR\n"));
 			union node *nwrap = (union node *) malloc (sizeof (struct nvar));
-			nwrap->type = NVAR;	
+			nwrap->type = NVAR;
 			nwrap->nvar.com = n;
 			n = nwrap;
 		}
 
 		if (n->type != NCMD || n == NEOF) {
 			TRACE(("Nodetype: %i\n", n->type));
-			dg_graph_lock ();
 			dg_graph_add (n);
-			dg_graph_unlock ();
 			if (n == NEOF)
 				break;
 		} else

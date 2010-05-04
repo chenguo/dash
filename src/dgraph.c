@@ -82,19 +82,26 @@ dg_graph_unlock(void) {
 struct dg_list *
 dg_graph_run (void)
 {
-  if (frontier->run_next == NULL) {
-    pthread_cond_wait(&frontier->runnable, &frontier->dg_lock);
-  }
+	dg_graph_lock ();
 
-  //TRACE(("DG GRAPH RUN\n"));
-  if (frontier->run_next)
-    {
-      struct dg_list *ret = frontier->run_next;
-      frontier->run_next = frontier->run_next->next;
-      return ret;
-    }
-  else
-    return NULL;
+	// Blocks until there's nodes in the graph
+	if (frontier->run_next == NULL) {
+		pthread_cond_wait(&frontier->runnable, &frontier->dg_lock);
+	}
+
+	//TRACE(("DG GRAPH RUN\n"));
+
+	//if (frontier->run_next)
+	//{
+		struct dg_list *ret = frontier->run_next;
+		frontier->run_next = frontier->run_next->next;
+		dg_graph_unlock ();
+		return ret;
+	//}
+	//else {
+		//dg_graph_unlock ();
+		//return NULL;
+	//}
 }
 
 
@@ -102,36 +109,40 @@ dg_graph_run (void)
 void
 dg_graph_add (union node *new_cmd)
 {
-  TRACE(("DG GRAPH ADD\n"));
-  //TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
-  //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
-  //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
+	dg_graph_lock ();
 
-  /* Create a node for this command. */
-  struct dg_node *new_node = dg_node_create (new_cmd);
+	TRACE(("DG GRAPH ADD\n"));
+	//TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
+	//new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
+	//new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
 
-  /* Step through frontier nodes. */
-  struct dg_list *iter = frontier->run_list;
+	/* Create a node for this command. */
+	struct dg_node *new_node = dg_node_create (new_cmd);
 
-  while (iter)
-    {
-      /* Follow frontier node and check for dependencies. */
-      new_node->dependencies += dg_dep_add (new_node, iter->node);
+	/* Step through frontier nodes. */
+	struct dg_list *iter = frontier->run_list;
 
-      /* Increment to next frontier node. */
-      iter = iter->next;
-    }
-  TRACE(("DG GRAPH ADD: deps %d\n", new_node->dependencies));
-  //TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
-  //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
-  //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
+	while (iter)
+	{
+		/* Follow frontier node and check for dependencies. */
+		new_node->dependencies += dg_dep_add (new_node, iter->node);
 
-  /* If no file access dependencies, this is a frontier node. */
-  if (new_node->dependencies == 0)
-    dg_frontier_add (new_node);
+		/* Increment to next frontier node. */
+		iter = iter->next;
+	}
+	TRACE(("DG GRAPH ADD: deps %d\n", new_node->dependencies));
+	//TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
+	//new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
+	//new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
 
-  // Send a signal to wake up all blocked dg_run threads
-  pthread_cond_signal(&frontier->runnable);
+	/* If no file access dependencies, this is a frontier node. */
+	if (new_node->dependencies == 0)
+		dg_frontier_add (new_node);
+
+	// Send a signal to wake up blocked dg_run threads
+	pthread_cond_signal(&frontier->runnable);
+
+	dg_graph_unlock ();
 }
 
 
@@ -202,7 +213,7 @@ dg_file_check (struct dg_node *node1, struct dg_node *node2)
 static int
 dg_dep_add (struct dg_node *new_node, struct dg_node *node)
 {
-  TRACE(("DG DEP ADD\n"));
+  TRACE(("DG DEP ADD  %i  %i\n", new_node, node));
   /* Establish dependency. */
   int file_access;
 
@@ -386,30 +397,36 @@ dg_frontier_add (struct dg_node *graph_node)
 void
 dg_frontier_remove (struct dg_list *rem)
 {
-  TRACE (("DG_FRONTIER_REMOVE\n"));
+	dg_graph_lock();
 
-  /* Do NOT remove EOF from frontier. */
-  if (rem->node->command == NEOF)
-    return;
+	TRACE (("DG_FRONTIER_REMOVE\n"));
 
-  if (rem->prev)
-    {
-      /* Node is not first in LL. */
-      rem->prev->next = rem->next;
+	/* Do NOT remove EOF from frontier. */
+	if (rem->node->command == NEOF) {
+		dg_graph_unlock();
+		return;
+	}
 
-      if (rem->next)
-        rem->next->prev = rem->prev;
-    }
-  else
-    /* Node is first in LL. */
-    frontier->run_list = rem->next;
+	if (rem->prev)
+	{
+		/* Node is not first in LL. */
+		rem->prev->next = rem->next;
 
-  if (frontier->tail == rem)
-    /* Node is last in LL. */
-    frontier->tail = rem->prev;
+		if (rem->next)
+			rem->next->prev = rem->prev;
+	}
+	else
+		/* Node is first in LL. */
+		frontier->run_list = rem->next;
 
-  dg_graph_remove (rem->node);
-  free (rem);
+	if (frontier->tail == rem)
+		/* Node is last in LL. */
+		frontier->tail = rem->prev;
+
+	dg_graph_remove (rem->node);
+	free (rem);
+
+	dg_graph_unlock();
 }
 
 
