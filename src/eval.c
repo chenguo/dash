@@ -197,18 +197,17 @@ evaltree(union node *n, int flags)
 	unsigned isor;
 	int status;
 	if (n == NULL) {
-		TRACE(("evaltree(NULL) called\n"));
+		//TRACE(("evaltree(NULL) called\n"));
 		goto out;
 	}
 #ifndef SMALL
 	displayhist = 1;	/* show history substitutions done with fc */
 #endif
-	TRACE(("pid %d, evaltree(%p: %d, %d) called\n",
+	TRACE(("pid %d, evaltree(%p: %d, %d, %p) called\n",
 	    getpid(), n, n->type, flags));
 	switch (n->type) {
 	default:
 #ifdef DEBUG
-		out1fmt("Node type = %d\n", n->type);
 #ifndef USE_GLIBC_STDIO
 		flushout(out1);
 #endif
@@ -250,7 +249,7 @@ checkexit:
 	case NSUBSHELL:
 	case NBACKGND:
 		evalfn = evalsubshell;
-		goto calleval;
+		evalsubshell (n, flags);
 	case NPIPE:
 		evalfn = evalpipe;
 #ifdef notyet
@@ -282,7 +281,8 @@ checkexit:
 		if (!evalskip) {
 			n = n->nbinary.ch2;
 evaln:
-			evalfn = evaltree;
+			evaltree(n, flags);
+			break;
 calleval:
 			evalfn(n, flags);
 			break;
@@ -325,6 +325,7 @@ void evaltreenr(union node *n, int flags)
 #else
 {
 	evaltree(n, flags);
+TRACE(("EVALTREENR abort\n"));
 	abort();
 }
 #endif
@@ -459,6 +460,7 @@ evalsubshell(union node *n, int flags)
 			flags &=~ EV_TESTED;
 nofork:
 		redirect(n->nredir.redirect, 0);
+
 		evaltreenr(n->nredir.n, flags);
 		/* never returns */
 	}
@@ -468,8 +470,6 @@ nofork:
 	exitstatus = status;
 	INTON;
 }
-
-
 
 /*
  * Compute the names of the files in a redirection list.
@@ -841,10 +841,10 @@ bail:
 		listsetvar(varlist.list, VEXPORT|VSTACK);
 		shellexec(argv, path, cmdentry.u.index);
 		/* NOTREACHED */
-
 	case CMDBUILTIN:
 		cmdenviron = varlist.list;
 		if (cmdenviron) {
+			TRACE(("EVALCOMMAND: cmdenviron\n"));
 			struct strlist *list = cmdenviron;
 			int i = VNOSET;
 			if (spclbltin > 0 || argc == 0) {
@@ -871,6 +871,7 @@ raise:
 			}
 			FORCEINTON;
 		}
+		TRACE(("EvALCOMMAND: still here\n"));
 		break;
 
 	case CMDFUNCTION:
@@ -909,7 +910,10 @@ evalbltin(const struct builtincmd *cmd, int argc, char **argv, int flags)
 	argptr = argv + 1;
 	optptr = NULL;			/* initialize nextopt */
 	if (cmd == EVALCMD)
+{
+		TRACE(("EVALBLTIN: call evalcmd\n"));
 		status = evalcmd(argc, argv, flags);
+}
 	else
 		status = (*cmd->builtin)(argc, argv);
 	flushall();
