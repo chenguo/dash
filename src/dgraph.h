@@ -42,4 +42,5 @@ void dg_graph_lock (void);
 void dg_graph_unlock (void);
 void dg_graph_add (union node *);
 struct dg_list *dg_graph_run (void);
+void dg_frontier_nonempty (void);
 void dg_frontier_remove (struct dg_list *);

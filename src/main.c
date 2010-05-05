@@ -82,6 +82,7 @@ STATIC void read_profile(const char *);
 STATIC char *find_dot_file(char *);
 static int cmdloop(int);
 static void *parseloop(void *);
+static void *jobloop(void *);
 static void *evaltree_thread(void *);
 static void node_process(union node *node);
 int main(int, char **);
@@ -232,22 +233,20 @@ cmdloop(int top)
 	pthread_create (&thread, NULL, parseloop, (void *) &top);
 	pthread_detach (thread);
 
+	/* Start jobloop. */
+	pthread_create (&thread, NULL, jobloop, NULL);
+
 	while (1) {
-		/* jobs MUST be on, since that's the only mechanism dash provides for
-		   knowning when a command finished.
-
-		   Another note: only main cmdloop should call showjobs. */
-		//if (jobctl)
-		showjobs(out2, SHOW_CHANGED);
-
 		frontier_node = dg_graph_run();
 		if (frontier_node) {
 			TRACE(("CMDLOOP: pulled %d\n", frontier_node->node->command->type));
 			n = frontier_node->node->command;
 		}
-		else
-			n = NULL;
-
+		else {
+			TRACE(("CMDLOOP: pulled null\n"));
+			continue;
+		}
+		
 		/* showtree(n); DEBUG */
 		if (n == NEOF) {
 			if (!top || numeof >= 50)
@@ -276,6 +275,9 @@ cmdloop(int top)
 		}
 	}
 	popstackmark(&smark);
+
+	pthread_cancel (thread);
+	pthread_join (&thread, NULL);
 
 	return 0;
 }
@@ -320,6 +322,28 @@ parseloop (void *topp)
 
 	TRACE(("PARSELOOP return.\n"));
 	return NULL;
+}
+
+
+/* Continously show job statuses. */
+static void *
+jobloop (void *data)
+{
+  pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, NULL);
+
+  /* The wait that showjobs calls wont block if there aren't any child
+     processes. Thus, make sure frontier is non-empty, or else calling
+     it is pointless. */
+  while (1)
+    {
+      /* This function does a condwait if frontier is empty. */
+      TRACE(("JOBLOOP: looping\n"));
+      dg_frontier_nonempty ();
+      showjobs(out2, SHOW_CHANGED);
+      pthread_testcancel ();
+    }
+
+  return NULL;
 }
 
 

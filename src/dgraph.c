@@ -83,7 +83,7 @@ struct dg_list *
 dg_graph_run (void)
 {
   dg_graph_lock ();
-//  TRACE(("DG GRAPH RUN\n"));
+  TRACE(("DG GRAPH RUN\n"));
 
   /* Blocks until there's nodes in the graph. */
   while (frontier->run_next == NULL)
@@ -402,11 +402,25 @@ dg_frontier_add (struct dg_node *graph_node)
 
 
   // Send a signal to wake up blocked dg_run threads
-  pthread_cond_signal(&frontier->dg_cond);
+  pthread_cond_broadcast (&frontier->dg_cond);
 
   //TRACE(("DG FRONTIER ADD n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
   //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
   //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
+}
+
+
+/* Wait until frontier has commands. */
+void
+dg_frontier_nonempty ()
+{
+  dg_graph_lock ();
+
+  if (!frontier->run_list)
+    pthread_cond_wait (&frontier->dg_cond, &frontier->dg_lock);
+
+  dg_graph_unlock ();
+  return;
 }
 
 /* Remove the runnables list node corresponding to a frontier
