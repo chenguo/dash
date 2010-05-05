@@ -86,15 +86,16 @@ dg_graph_run (void)
 //  TRACE(("DG GRAPH RUN\n"));
 
   /* Blocks until there's nodes in the graph. */
-//  while (frontier->run_next == NULL)
-//{
-//TRACE(("cond wait\n"));
-//    pthread_cond_wait (&frontier->dg_cond, &frontier->dg_lock);
-//}
+  while (frontier->run_next == NULL)
+  {
+    TRACE(("DG_GRAPH_RUN: cond wait\n"));
+    pthread_cond_wait (&frontier->dg_cond, &frontier->dg_lock);
+    TRACE(("DG_GRAPH_RUN: cond wait complete\n"));
+  }
 
   struct dg_list *ret = frontier->run_next;
   if (frontier->run_next)
-  frontier->run_next = frontier->run_next->next;
+    frontier->run_next = frontier->run_next->next;
   dg_graph_unlock ();
   return ret;
 }
@@ -264,24 +265,43 @@ dg_dep_add (struct dg_node *new_node, struct dg_node *node)
 static struct dg_node *
 dg_node_create (union node *new_cmd)
 {
-  TRACE(("DG NODE CREATE %i\n", new_cmd->type));
+  TRACE(("DG NODE CREATE\n"));
   //TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
   //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
   //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
   struct dg_node *new_node = malloc (sizeof *new_node);
   new_node->dependents = NULL;
+  new_node->dependencies = 0;
+  new_node->command = new_cmd;
 
+  union node *flist;
   if (new_cmd->type == NBACKGND)
     {
-      union node *flist = new_cmd->nredir.n->ncmd.redirect;
+      flist = new_cmd->nredir.n->ncmd.redirect;
 
       new_node->files = dg_node_files (flist);
+    }
+  else if (new_cmd->type == NVAR)
+    {
+      /* NVAR writes to a variable. */
+      struct dg_file *var = malloc (sizeof *var);
+      char *cmdstr = new_cmd->nvar.com->ncmd.assign->narg.text;
+      var->name_size = strchr (cmdstr, '=') - cmdstr + 1;
+      var->file = malloc (var->name_size);
+      strncpy (var->file + 1, cmdstr, var->name_size);
+      *(var->file) = '$';
+      *(var->file + var->name_size) = '\0';
+      var->rw = WRITE_ACCESS;
+      TRACE(("NVAR: %s\n", var->file));
+
+      struct nodelist *nodes= new_cmd->nvar.com->ncmd.assign->narg.backquote;
+      if (nodes)
+        TRACE(("NODES NODES NODES\n"));
+
     }
   else
     ;/* Other node types, such as loops, not yet supported. */
 
-  new_node->dependencies = 0;
-  new_node->command = new_cmd;
   //TRACE(("DG NODE CREATE n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
   //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
   //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));

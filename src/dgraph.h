@@ -12,7 +12,7 @@ struct dg_list
 struct dg_file
 {
   char *file;                  /* Name of file or var. */
-  int name_size;               /* Lenght of the file name. */
+  int name_size;               /* Length of the file name. */
   int rw;                      /* Read/write access. */
   struct dg_file *next;        /* Next file dependency. */
 };

@@ -228,21 +228,23 @@ cmdloop(int top)
 	setstackmark(&smark);
 
 	dg_graph_init();
+	/* Start parseloop. */
 	pthread_create (&thread, NULL, parseloop, (void *) &top);
 	pthread_detach (thread);
 
 	while (1) {
 		/* jobs MUST be on, since that's the only mechanism dash provides for
-		   knowning when a command finished. */
+		   knowning when a command finished.
+
+		   Another note: only main cmdloop should call showjobs. */
 		//if (jobctl)
 		showjobs(out2, SHOW_CHANGED);
 
 		frontier_node = dg_graph_run();
-		if (frontier_node)
-{
-TRACE(("CMDLOOP: pulled %d\n", frontier_node->node->command->type));
+		if (frontier_node) {
+			TRACE(("CMDLOOP: pulled %d\n", frontier_node->node->command->type));
 			n = frontier_node->node->command;
-}
+		}
 		else
 			n = NULL;
 
@@ -256,10 +258,10 @@ TRACE(("CMDLOOP: pulled %d\n", frontier_node->node->command->type));
 				out2str("\nUse \"exit\" to leave shell.\n");
 			}
 			numeof++;
-		} else if (nflag == 0) {
+		} else if (n && nflag == 0) {
 			job_warning = (job_warning == 2) ? 1 : 0;
 			numeof = 0;
-			if (!n || n->type != NVAR) {
+			if (n->type != NVAR) {
 				evaltree(n, 0, frontier_node);
 			}
 			else {

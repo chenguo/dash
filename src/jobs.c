@@ -518,7 +518,6 @@ start:
 		TRACE(("SHOWJOB: %d:%p call freejob\n", getpid(), jp));
 		freejob(jp);
 	}
-TRACE(("showjob: ret\n"));
 }
 
 
@@ -561,8 +560,9 @@ showjobs(struct output *out, int mode)
 //	TRACE(("showjobs(%x) called\n", mode));
 
 	/* If not even one one job changed, there is nothing to do */
-	while (dowait(DOWAIT_NORMAL, NULL) > 0)
+	while (dowait(DOWAIT_BLOCK, NULL) > 0)
 		continue;
+	//dowait (DOWAIT_BLOCK, NULL);
 
 	for (jp = curjob; jp; jp = jp->prev_job) {
 		if (!(mode & SHOW_CHANGED) || jp->changed)
@@ -583,10 +583,12 @@ freejob(struct job *jp)
 	static pthread_mutex_t joblock = PTHREAD_MUTEX_INITIALIZER;
 
 	pthread_mutex_lock (&joblock);
-	if (!jp->used) {
+	if (!jp->used || jp->state != JOBDONE) {
 		pthread_mutex_unlock (&joblock);
 		return;
 	}
+
+	TRACE(("FREEJOB: freeing\n"));
 	INTOFF;
 	for (i = jp->nprocs, ps = jp->ps ; --i >= 0 ; ps++) {
 		if (ps->cmd != nullstr)
@@ -1158,6 +1160,7 @@ waitproc(int block, int *status)
 
 	do {
 		err = wait3(status, flags, NULL);
+		TRACE(("WAIT3: err %d\n", err));
 		if (err || !block)
 			break;
 
