@@ -34,7 +34,7 @@ struct dg_frontier
   struct dg_list *run_next;    /* Next non-running runnable command. */
   struct dg_list *tail;        /* Last element in LL. */
   pthread_mutex_t dg_lock;     /* Lock for directed graph. */
-  pthread_cond_t runnable;     /* Run conditional variable */
+  pthread_cond_t dg_cond;     /* Run conditional variable */
 };
 
 void dg_graph_init (void);

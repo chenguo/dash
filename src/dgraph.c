@@ -60,7 +60,7 @@ dg_graph_init (void)
   frontier->run_next = NULL;
   frontier->tail = NULL;
   pthread_mutex_init (&frontier->dg_lock, NULL);
-  pthread_cond_init(&frontier->runnable, NULL);
+  pthread_cond_init (&frontier->dg_cond, NULL);
 }
 
 
@@ -82,26 +82,21 @@ dg_graph_unlock(void) {
 struct dg_list *
 dg_graph_run (void)
 {
-	dg_graph_lock ();
+  dg_graph_lock ();
+//  TRACE(("DG GRAPH RUN\n"));
 
-	// Blocks until there's nodes in the graph
-	if (frontier->run_next == NULL) {
-		pthread_cond_wait(&frontier->runnable, &frontier->dg_lock);
-	}
+  /* Blocks until there's nodes in the graph. */
+//  while (frontier->run_next == NULL)
+//{
+//TRACE(("cond wait\n"));
+//    pthread_cond_wait (&frontier->dg_cond, &frontier->dg_lock);
+//}
 
-	//TRACE(("DG GRAPH RUN\n"));
-
-	//if (frontier->run_next)
-	//{
-		struct dg_list *ret = frontier->run_next;
-		frontier->run_next = frontier->run_next->next;
-		dg_graph_unlock ();
-		return ret;
-	//}
-	//else {
-		//dg_graph_unlock ();
-		//return NULL;
-	//}
+  struct dg_list *ret = frontier->run_next;
+  if (frontier->run_next)
+  frontier->run_next = frontier->run_next->next;
+  dg_graph_unlock ();
+  return ret;
 }
 
 
@@ -139,9 +134,6 @@ dg_graph_add (union node *new_cmd)
 	if (new_node->dependencies == 0)
 		dg_frontier_add (new_node);
 
-	// Send a signal to wake up blocked dg_run threads
-	pthread_cond_signal(&frontier->runnable);
-
 	dg_graph_unlock ();
 }
 
@@ -152,7 +144,7 @@ dg_graph_add (union node *new_cmd)
 static void
 dg_graph_remove (struct dg_node *graph_node)
 {
-  TRACE(("DG GRAPH REMOVE\n"));
+  TRACE(("DG GRAPH REMOVE %p\n", graph_node));
   /* Step through dependents. */
   struct dg_list *iter = graph_node->dependents;
   while (iter)
@@ -168,8 +160,10 @@ dg_graph_remove (struct dg_node *graph_node)
     }
 
   free_command (graph_node->command);
-  free (graph_node->dependents);
-  free (graph_node->files);
+  if (graph_node->dependents)
+    free (graph_node->dependents);
+  if (graph_node->files)
+    free (graph_node->files);
   free (graph_node);
 }
 
@@ -178,7 +172,7 @@ dg_graph_remove (struct dg_node *graph_node)
 static int
 dg_file_check (struct dg_node *node1, struct dg_node *node2)
 {
-  TRACE(("DG FILE CHECK\n"));
+  TRACE(("DG FILE CHECK %p %p\n", node1, node2));
   struct dg_file *files1 = node1->files;
   struct dg_file *files2 = node2->files;
 
@@ -187,7 +181,7 @@ dg_file_check (struct dg_node *node1, struct dg_node *node2)
     {
       while (files2)
         {
-  TRACE(("CHECKING %s and %s\n", files1->file, files2->file));
+          TRACE(("CHECKING %s and %s\n", files1->file, files2->file));
           /* If same file is accessed. */
           if (strcmp (files1->file, files2->file) == 0)
             {
@@ -213,7 +207,7 @@ dg_file_check (struct dg_node *node1, struct dg_node *node2)
 static int
 dg_dep_add (struct dg_node *new_node, struct dg_node *node)
 {
-  TRACE(("DG DEP ADD  %i  %i\n", new_node, node));
+  TRACE(("DG DEP ADD  %p %p\n", new_node, node));
   /* Establish dependency. */
   int file_access;
 
@@ -387,6 +381,9 @@ dg_frontier_add (struct dg_node *graph_node)
   frontier->tail->next = NULL;
 
 
+  // Send a signal to wake up blocked dg_run threads
+  pthread_cond_signal(&frontier->dg_cond);
+
   //TRACE(("DG FRONTIER ADD n %p redir %p, args %p, args2 %p, args3 %p\n", new_cmd, new_cmd->nredir.n,
   //new_cmd->nredir.n->ncmd.args, new_cmd->nredir.n->ncmd.args->narg.next,
   //new_cmd->nredir.n->ncmd.args->narg.next->narg.next));
@@ -399,7 +396,7 @@ dg_frontier_remove (struct dg_list *rem)
 {
 	dg_graph_lock();
 
-	TRACE (("DG_FRONTIER_REMOVE\n"));
+	TRACE (("DG_FRONTIER_REMOVE rem %p\n", rem));
 
 	/* Do NOT remove EOF from frontier. */
 	if (rem->node->command == NEOF) {
@@ -407,6 +404,7 @@ dg_frontier_remove (struct dg_list *rem)
 		return;
 	}
 
+	TRACE(("DG_FRONTIER_REMOVE: still here\n"));
 	if (rem->prev)
 	{
 		/* Node is not first in LL. */
@@ -416,12 +414,21 @@ dg_frontier_remove (struct dg_list *rem)
 			rem->next->prev = rem->prev;
 	}
 	else
+	{
+		TRACE(("DG_FRONTIER_REMOVE: new runlist %p\n", rem->next));
 		/* Node is first in LL. */
 		frontier->run_list = rem->next;
 
+		if (rem->next)
+			rem->next->prev = NULL;
+	}
+
 	if (frontier->tail == rem)
+	{
+		TRACE(("DG_FRONTIER_REMOVE: new tail %p\n", rem->prev));
 		/* Node is last in LL. */
 		frontier->tail = rem->prev;
+	}
 
 	dg_graph_remove (rem->node);
 	free (rem);
@@ -444,9 +451,16 @@ free_command (union node *node)
     if (node->ncmd.redirect)
       free_command (node->ncmd.redirect);
     break;
+  case NVAR:
+    TRACE(("FREE_COMMAND: NVAR\n"));
+    if (node->nvar.com)
+      free_command (node->nvar.com);
+    break;
   case NPIPE:
+    TRACE(("FREE_COMMAND: NPIPE\n"));
     if (node->npipe.cmdlist)
       ;/*TODO: free nodelist. */
+    break;
   case NREDIR:
   case NBACKGND:
   case NSUBSHELL:
@@ -461,12 +475,14 @@ free_command (union node *node)
   case NSEMI:
   case NWHILE:
   case NUNTIL:
+    TRACE(("FREE_COMMAND: NBINARY\n"));
     if (node->nbinary.ch1)
       free_command (node->nbinary.ch1);
     if (node->nbinary.ch2)
       free_command (node->nbinary.ch2);
     break;
   case NIF:
+    TRACE(("FREE_COMMAND: NIF\n"));
     if (node->nif.test)
       free_command (node->nif.test);
     if (node->nif.ifpart)
@@ -475,6 +491,7 @@ free_command (union node *node)
       free_command (node->nif.elsepart);
     break;
   case NFOR:
+    TRACE(("FREE_COMMAND: NFOR\n"));
     if (node->nfor.args)
       free_command (node->nfor.args);
     if (node->nfor.body)
@@ -483,12 +500,14 @@ free_command (union node *node)
       free (node->nfor.var);
     break;
   case NCASE:
+    TRACE(("FREE_COMMAND: NCASE\n"));
     if (node->ncase.expr)
       free_command (node->ncase.expr);
     if (node->ncase.cases)
       free_command (node->ncase.cases);
     break;
   case NCLIST:
+    TRACE(("FREE_COMMAND: NCLIST\n"));
     if (node->nclist.next)
       free_command (node->nclist.next);
     if (node->nclist.pattern)
@@ -521,6 +540,7 @@ free_command (union node *node)
    break;
   case NTOFD:
   case NFROMFD:
+    TRACE(("FREE_COMMAND: NDUP\n"));
     if (node->ndup.next)
       free_command (node->ndup.next);
     if (node->ndup.vname)
@@ -528,12 +548,14 @@ free_command (union node *node)
     break;
   case NHERE:
   case NXHERE:
+    TRACE(("FREE_COMMAND: NHERE\n"));
     if (node->nhere.next);
       free_command (node->nhere.next);
     if (node->nhere.doc)
       free_command (node->nhere.doc);
     break;
   case NNOT:
+    TRACE(("FREE_COMMAND: NNOT\n"));
     if (node->nnot.com)
       free_command (node->nnot.com);
     break;

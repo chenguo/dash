@@ -45,6 +45,7 @@
 #include <sys/resource.h>
 #endif
 #include <sys/ioctl.h>
+#include <pthread.h>
 
 #include "shell.h"
 #if JOBS
@@ -445,7 +446,7 @@ out:
 static void
 showjob(struct output *out, struct job *jp, int mode)
 {
-TRACE(("showjob called.\n"));
+	TRACE(("showjob called.\n"));
 	struct procstat *ps;
 	struct procstat *psend;
 	int col;
@@ -481,9 +482,6 @@ TRACE(("showjob called.\n"));
 #if JOBS
 		if (jp->state == JOBSTOPPED)
 			status = jp->stopstatus;
-		else {/* JOBDONE */
-			dg_frontier_remove (jp->ps0.node);
-		}
 #endif
 		col += sprint_status(s + col, status, 0);
 	}
@@ -513,8 +511,14 @@ start:
 
 	if (jp->state == JOBDONE) {
 		TRACE(("showjob: freeing job %d\n", jobno(jp)));
+		if (jp->ps0.node) {
+			dg_frontier_remove (jp->ps0.node);
+			jp->ps0.node = NULL;
+		}
+		TRACE(("SHOWJOB: %d:%p call freejob\n", getpid(), jp));
 		freejob(jp);
 	}
+TRACE(("showjob: ret\n"));
 }
 
 
@@ -573,9 +577,16 @@ showjobs(struct output *out, int mode)
 STATIC void
 freejob(struct job *jp)
 {
+	TRACE(("FREEJOB %d:%p\n", getpid(), jp));
 	struct procstat *ps;
 	int i;
+	static pthread_mutex_t joblock = PTHREAD_MUTEX_INITIALIZER;
 
+	pthread_mutex_lock (&joblock);
+	if (!jp->used) {
+		pthread_mutex_unlock (&joblock);
+		return;
+	}
 	INTOFF;
 	for (i = jp->nprocs, ps = jp->ps ; --i >= 0 ; ps++) {
 		if (ps->cmd != nullstr)
@@ -586,6 +597,7 @@ freejob(struct job *jp)
 	jp->used = 0;
 	set_curjob(jp, CUR_DELETE);
 	INTON;
+	pthread_mutex_unlock (&joblock);
 }
 
 
@@ -751,7 +763,9 @@ makejob(union node *node, int nprocs, struct dg_list *dgraph_node)
 {
 	int i;
 	struct job *jp;
+	//static pthread_mutex_t joblock;
 
+	//pthread_mutex_lock (&joblock);
 	for (i = njobs, jp = jobtab ; ; jp++) {
 		if (--i < 0) {
 			jp = growjobtab();
@@ -781,6 +795,7 @@ makejob(union node *node, int nprocs, struct dg_list *dgraph_node)
 	}
 	TRACE(("makejob(0x%lx, %d) returns %%%d\n", (long)node, nprocs,
 	    jobno(jp)));
+	//pthread_mutex_unlock (&joblock);
 	return jp;
 }
 
@@ -924,10 +939,7 @@ forkparent(struct job *jp, union node *n, int mode, pid_t pid)
 		ps->status = -1;
 		ps->cmd = nullstr;
 		if (jobctl && n)
-{
-TRACE(("FORKPARENT call commandtext, n->type %d\n", n->type));
 			ps->cmd = commandtext(n);
-}
 	}
 }
 
@@ -997,8 +1009,11 @@ waitforjob(struct job *jp)
 			raise(SIGINT);
 	}
 #endif
-	if (! JOBS || jp->state == JOBDONE)
+	if (! JOBS || (jp->state == JOBDONE && jp->used))
+{
+TRACE(("WAITFORJOB: %d:%p call freejob\n", getpid(), jp));
 		freejob(jp);
+}
 	return st;
 }
 
@@ -1197,7 +1212,6 @@ commandtext(union node *n)
 	char *name;
 
 	STARTSTACKSTR(cmdnextc);
-TRACE(("COMMANDTEXT cmdtxt n->type %d, n %p\n", n->type, n));
 	cmdtxt(n);
 	name = stackblock();
 //	TRACE(("commandtext: name %p, end %p\n\t\"%s\"\n",
@@ -1209,7 +1223,7 @@ TRACE(("COMMANDTEXT cmdtxt n->type %d, n %p\n", n->type, n));
 STATIC void
 cmdtxt(union node *n)
 {
-TRACE(("CMDTXT n->type: %d, n %p\n", n->type, n));
+	//TRACE(("CMDTXT n->type: %d, n %p\n", n->type, n));
 	union node *np;
 	struct nodelist *lp;
 	const char *p;

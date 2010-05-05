@@ -203,12 +203,11 @@ evaltree(union node *n, int flags, struct dg_list *dgraph_node)
 #ifndef SMALL
 	displayhist = 1;	/* show history substitutions done with fc */
 #endif
-	TRACE(("pid %d, evaltree(%p: %d, %d) called\n",
-	    getpid(), n, n->type, flags));
+	TRACE(("pid %d, evaltree(%p: %d, %d, %p) called\n",
+	    getpid(), n, n->type, flags, dgraph_node));
 	switch (n->type) {
 	default:
 #ifdef DEBUG
-		out1fmt("Node type = %d\n", n->type);
 #ifndef USE_GLIBC_STDIO
 		flushout(out1);
 #endif
@@ -843,11 +842,10 @@ bail:
 		listsetvar(varlist.list, VEXPORT|VSTACK);
 		shellexec(argv, path, cmdentry.u.index);
 		/* NOTREACHED */
-
 	case CMDBUILTIN:
 		cmdenviron = varlist.list;
 		if (cmdenviron) {
-TRACE(("CMDENVIRON\n"));
+			TRACE(("EVALCOMMAND: cmdenviron\n"));
 			struct strlist *list = cmdenviron;
 			int i = VNOSET;
 			if (spclbltin > 0 || argc == 0) {
@@ -874,6 +872,7 @@ raise:
 			}
 			FORCEINTON;
 		}
+		TRACE(("EvALCOMMAND: still here\n"));
 		break;
 
 	case CMDFUNCTION:
@@ -897,7 +896,6 @@ out:
 STATIC int
 evalbltin(const struct builtincmd *cmd, int argc, char **argv, int flags)
 {
-TRACE(("Evalbltin\n"));
 	char *volatile savecmdname;
 	struct jmploc *volatile savehandler;
 	struct jmploc jmploc;
@@ -913,7 +911,10 @@ TRACE(("Evalbltin\n"));
 	argptr = argv + 1;
 	optptr = NULL;			/* initialize nextopt */
 	if (cmd == EVALCMD)
+{
+		TRACE(("EVALBLTIN: call evalcmd\n"));
 		status = evalcmd(argc, argv, flags);
+}
 	else
 		status = (*cmd->builtin)(argc, argv);
 	flushall();

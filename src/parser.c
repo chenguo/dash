@@ -562,8 +562,12 @@ out:
 	n = (union node *)malloc(sizeof (struct ncmd));
 	n->type = NCMD;
         if (args) {
-		n->ncmd.args = (union node *)malloc (sizeof (struct narg));
-		*n->ncmd.args = *args;
+		n->ncmd.args = (union node *)malloc (sizeof (struct narg) + 4);
+		//*n->ncmd.args = *args;
+		n->ncmd.args->narg.type = args->narg.type;
+		n->ncmd.args->narg.next = args->narg.next;
+		n->ncmd.args->narg.text = args->narg.text;
+		n->ncmd.args->narg.backquote = args->narg.backquote;
 	}
 	else
 		n->ncmd.args = NULL;

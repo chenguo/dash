@@ -83,6 +83,7 @@ STATIC char *find_dot_file(char *);
 static int cmdloop(int);
 static void *parseloop(void *);
 static void *evaltree_thread(void *);
+static void node_process(union node *node);
 int main(int, char **);
 
 struct et_args
@@ -228,6 +229,7 @@ cmdloop(int top)
 
 	dg_graph_init();
 	pthread_create (&thread, NULL, parseloop, (void *) &top);
+	pthread_detach (thread);
 
 	while (1) {
 		/* jobs MUST be on, since that's the only mechanism dash provides for
@@ -237,7 +239,10 @@ cmdloop(int top)
 
 		frontier_node = dg_graph_run();
 		if (frontier_node)
+{
+TRACE(("CMDLOOP: pulled %d\n", frontier_node->node->command->type));
 			n = frontier_node->node->command;
+}
 		else
 			n = NULL;
 
@@ -258,7 +263,6 @@ cmdloop(int top)
 				evaltree(n, 0, frontier_node);
 			}
 			else {
-				TRACE(("NVAR\n"));
 				pthread_t thread;
 				struct et_args *args = malloc (sizeof *args);
 				args->node = n->nvar.com;
@@ -270,7 +274,6 @@ cmdloop(int top)
 		}
 	}
 	popstackmark(&smark);
-	/* TODO: Make sure created threads exit. */
 
 	return 0;
 }
@@ -297,63 +300,14 @@ parseloop (void *topp)
 		/* parsecmd returns a node. Wrap decides whether or not
 		   to wrap it with NBACKGND. */
 		n = parsecmd(inter);
-		TRACE(("PARSELOOP: parsecmd ret\n"));
+		if (n == NEOF)
+			TRACE(("PARSELOOP: parsecmd ret EOF\n"));
+		else if (n)
+			TRACE(("PARSELOOP: parsecmd ret type %d\n", n->type));
+		else
+			continue;
 
-		/* parsecmd returns a NCMD. Background it? */
-		int wrap = 0;
-		if (n != NEOF && n->type == NCMD) {
-			if (n->ncmd.args && n->ncmd.args->narg.text) {
-				TRACE(("NCMD: ARGS %s\n", n->ncmd.args->narg.text));
-
-				/* Check for commands we do NOT backgound on.
-				   This includes: cd and exit.
-				   TODO: think of more. */
-				if (strcmp (n->ncmd.args->narg.text, "cd") == 0
-				    || strcmp (n->ncmd.args->narg.text, "exit") == 0)
-					wrap = 0;
-				else
-					wrap = 1;
-			} else if (n->ncmd.assign && n->ncmd.assign->narg.text) {
-				TRACE(("NCMD: ASSIGN next %p\n", n->ncmd.assign->narg.next));
-				TRACE(("NCMD: ASSIGN text %s\n", n->ncmd.assign->narg.text));
-				TRACE(("NCMD: ASSIGN bqte %p\n", n->ncmd.assign->narg.backquote));
-				struct nodelist *tmp = n->ncmd.assign->narg.backquote;
-				while (tmp) {
-					TRACE(("NODELIST: type %d\n", tmp->n->type));
-					if (tmp->n->type == NCMD) {
-						TRACE(("NCMD: ARGS text %s\n", tmp->n->ncmd.args->narg.text));
-
-					}
-					tmp = tmp->next;
-				}
-				wrap = 2;
-			}
-		} else
-			wrap = 0;
-
-		if (wrap == 1) {
-			TRACE(("Wrapping with NBACKGND\n"));
-			union node *nwrap = (union node *) malloc (sizeof (struct nredir));
-			nwrap->type = NBACKGND;
-			nwrap->nredir.n = n;
-			nwrap->nredir.redirect = NULL;
-			n = nwrap;
-		} else if (wrap == 2) {
-			TRACE(("Wrapping with NVAR\n"));
-			union node *nwrap = (union node *) malloc (sizeof (struct nvar));
-			nwrap->type = NVAR;
-			nwrap->nvar.com = n;
-			n = nwrap;
-		}
-
-		if (n->type != NCMD || n == NEOF) {
-			TRACE(("Nodetype: %i\n", n->type));
-			dg_graph_add (n);
-			if (n == NEOF)
-				break;
-		} else
-			/* NCMD: for now, only cd and exit. */
-			evaltree (n, 0, NULL);
+		node_process (n);
 
 		skip = evalskip;
 		if (skip) {
@@ -372,10 +326,143 @@ static void *
 evaltree_thread (void *data)
 {
 	struct et_args *arg = (struct et_args *) data;
-	evaltree (arg->node, 0, arg->fnode);
-	free (data);
+	TRACE(("EVALTREE_THREAD: call evaltree.\n"));
+	evaltree (arg->node, 0, NULL);
+	free (arg);
 
+	TRACE(("EVALTREE_THREAD: return.\n"));
 	return NULL;
+}
+
+
+/* Process a node for addition into dgraph. */
+static void
+node_process(union node *n)
+{
+  /* Special case: EOF. */
+  if (n == NEOF)
+    {
+      TRACE(("Nodetype: NEOF\n"));
+      dg_graph_add (n);
+      pthread_exit(NULL);
+    }    
+  else if (!n)
+    return;
+
+  switch (n->type) {
+  case NCMD:
+    TRACE(("NODE_PROCESS: NCMD\n"));
+    int wrap = 0;
+    if (n->ncmd.args && n->ncmd.args->narg.text)
+      {
+        TRACE(("NCMD: ARGS %s\n", n->ncmd.args->narg.text));
+	
+        /* Check for commands we do NOT backgound on.
+           This includes: cd and exit.
+           TODO: think of more. */
+        if (strcmp (n->ncmd.args->narg.text, "cd") == 0
+            || strcmp (n->ncmd.args->narg.text, "exit") == 0)
+          wrap = 0;
+        else
+          wrap = 1;
+      }
+    else if (n->ncmd.assign && n->ncmd.assign->narg.text)
+      {
+        TRACE(("NCMD: ASSIGN next %p\n", n->ncmd.assign->narg.next));
+        TRACE(("NCMD: ASSIGN text %s\n", n->ncmd.assign->narg.text));
+        TRACE(("NCMD: ASSIGN bqte %p\n", n->ncmd.assign->narg.backquote));
+        struct nodelist *tmp = n->ncmd.assign->narg.backquote;
+        while (tmp)
+          {
+            TRACE(("NODELIST: type %d\n", tmp->n->type));
+            if (tmp->n->type == NCMD)
+              TRACE(("NCMD: ARGS text %s\n", tmp->n->ncmd.args->narg.text));
+            tmp = tmp->next;
+          }
+        wrap = 2;
+      }
+    else
+      wrap = 0;
+
+    if (wrap == 1)
+      {
+        TRACE(("Wrapping with NBACKGND\n"));
+        union node *nwrap = (union node *) malloc (sizeof (struct nredir));
+        nwrap->type = NBACKGND;
+        nwrap->nredir.n = n;
+        nwrap->nredir.redirect = NULL;
+        n = nwrap;
+      }
+    else if (wrap == 2)
+      {
+        TRACE(("Wrapping with NVAR\n"));
+        union node *nwrap = (union node *) malloc (sizeof (struct nvar));
+        nwrap->type = NVAR;	
+        nwrap->nvar.com = n;
+        n = nwrap;
+      }					
+
+    if (n->type != NCMD)
+      {
+	TRACE(("Nodetype: %i\n", n->type));
+        dg_graph_add (n);
+      }
+    else
+      /* NCMD: for now, only cd and exit. */
+      evaltree (n, 0, NULL);
+    break;
+  case NVAR:
+    TRACE(("NODE_PROCESS: NVAR\n"));
+    break;
+  case NPIPE:
+    TRACE(("NODE_PROCESS: NPIPE\n"));
+    break;
+  case NREDIR:
+  case NBACKGND:
+  case NSUBSHELL:
+    TRACE(("NODE_PROCESS: NREDIR\n"));
+    break;
+  case NAND:
+  case NOR:
+  case NSEMI:
+    TRACE(("NODE_PROCESS: NSEMI\n"));
+    if (n->nbinary.ch1)  
+      node_process (n->nbinary.ch1);
+    if (n->nbinary.ch2)
+      node_process (n->nbinary.ch2);
+    break;
+  case NWHILE:
+  case NUNTIL:
+    TRACE(("NODE_PROCESS: NBINARY\n"));
+    break;
+  case NIF:
+    break;
+  case NFOR:
+    break;
+  case NCASE:
+    break;
+  case NCLIST:
+    break;
+  case NDEFUN:
+  case NARG:
+    break;
+  case NTO:
+  case NCLOBBER:
+  case NFROM:
+  case NFROMTO:
+  case NAPPEND:
+    break;
+  case NTOFD:
+  case NFROMFD:
+    break;
+  case NHERE:
+  case NXHERE:
+    break;
+  case NNOT:
+    break;
+  default:
+    break;
+  }
 }
 
 
