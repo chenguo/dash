@@ -1035,9 +1035,9 @@ dowait(int block, struct job *job)
 	int state;
 
 	INTOFF;
-//	TRACE(("dowait(%d) called\n", block));
+	TRACE(("dowait(%d) called\n", block));
 	pid = waitproc(block, &status);
-//	TRACE(("wait returns pid %d, status=%d\n", pid, status));
+	TRACE(("wait returns pid %d, status=%d\n", pid, status));
 	if (pid <= 0)
 		goto out;
 

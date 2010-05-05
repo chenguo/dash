@@ -417,7 +417,11 @@ dg_frontier_nonempty ()
   dg_graph_lock ();
 
   if (!frontier->run_list)
-    pthread_cond_wait (&frontier->dg_cond, &frontier->dg_lock);
+    {
+      TRACE(("DG_FRONTIER_NONEMPTY: cond wait\n"));
+      pthread_cond_wait (&frontier->dg_cond, &frontier->dg_lock);
+      TRACE(("DG_FRONTIER_NONEMPTY: cond wait complete\n"));
+    }
 
   dg_graph_unlock ();
   return;

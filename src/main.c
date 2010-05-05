@@ -257,7 +257,7 @@ cmdloop(int top)
 				out2str("\nUse \"exit\" to leave shell.\n");
 			}
 			numeof++;
-		} else if (n && nflag == 0) {
+		} else if (nflag == 0) {
 			job_warning = (job_warning == 2) ? 1 : 0;
 			numeof = 0;
 			if (n->type != NVAR) {
@@ -275,9 +275,9 @@ cmdloop(int top)
 		}
 	}
 	popstackmark(&smark);
-
+ 
 	pthread_cancel (thread);
-	pthread_join (&thread, NULL);
+	pthread_join (thread, NULL);
 
 	return 0;
 }
