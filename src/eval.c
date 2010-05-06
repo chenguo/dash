@@ -250,6 +250,7 @@ checkexit:
 	case NBACKGND:
 		evalfn = evalsubshell;
 		evalsubshell (n, flags, dgraph_node);
+		break;
 	case NPIPE:
 		evalfn = evalpipe;
 #ifdef notyet
@@ -522,12 +523,6 @@ evalpipe(union node *n, int flags)
 	int pip[2];
 
 	TRACE(("evalpipe(0x%lx) called\n", (long)n));
-
-	TRACE(("EVALPIPE: n->type %d\n", n->type));
-	TRACE(("EVALPIPE: n->nredir.n %p\n", n->nredir.n));
-	TRACE(("EVALPIPE: n->nredir.redirect %p\n", n->nredir.redirect));
-
-
 	pipelen = 0;
 	for (lp = n->npipe.cmdlist ; lp ; lp = lp->next)
 		pipelen++;
@@ -535,7 +530,6 @@ evalpipe(union node *n, int flags)
 	INTOFF;
 	jp = makejob(n, pipelen, NULL);
 	prevfd = -1;
-	TRACE(("EVALPIPE: n->npipe.cmdlist %p\n", n->npipe.cmdlist));
 	for (lp = n->npipe.cmdlist ; lp ; lp = lp->next) {
 		prehash(lp->n);
 		pip[1] = -1;
