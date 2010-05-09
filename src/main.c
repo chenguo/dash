@@ -463,6 +463,22 @@ node_process(union node *n)
     TRACE(("NODE_PROCESS: NBINARY\n"));
     break;
   case NIF:
+    TRACE(("NODE_PROCESS: NIF\n"));
+    if (n->nif.test)
+      {
+        TRACE(("NODE_PROCESS: nif.text->type %d\n", n->nif.test->type));
+      }
+    if (n->nif.ifpart)
+      {
+        TRACE(("NODE_PROCESS: nif.ifpart->type %d\n", n->nif.ifpart->type));
+        TRACE(("NODE_PROCESS: nsemi 1 type %d\n", n->nif.ifpart->nbinary.ch1->type));
+        TRACE(("NODE_PROCESS: nsemi 2 type %d\n", n->nif.ifpart->nbinary.ch2->type));
+      }
+    if (n->nif.elsepart)
+      {
+        TRACE(("NODE_PROCESS: nif.elsepart->type %d\n", n->nif.elsepart->type));
+      }
+    dg_graph_add (n);
     break;
   case NFOR:
     break;
