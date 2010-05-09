@@ -354,6 +354,7 @@ evaltree_thread (void *data)
 	struct et_args *arg = (struct et_args *) data;
 	TRACE(("EVALTREE_THREAD: call evaltree.\n"));
 	evaltree (arg->node, 0, NULL);
+	dg_frontier_remove (arg->fnode);
 	free (arg);
 
 	TRACE(("EVALTREE_THREAD: return.\n"));
