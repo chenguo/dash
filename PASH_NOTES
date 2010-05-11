@@ -1,8 +1,3 @@
-MISC NOTES:
-NEOF is a dependent of EVERY node, not just every tree.
-
-
-
 Command queue: IS THIS NECESSARY?
 PROS: limit complexity of directed graph
 CON: adds complexity of its own

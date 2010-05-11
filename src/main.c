@@ -262,6 +262,8 @@ cmdloop(int top)
 			numeof = 0;
 			if (n->type == NIF ) {
 				evaltree (n->nif.test, 0, frontier_node);
+			} else if (n->type == NAND || n->type == NOR) {
+				evaltree (n->nbinary.ch1, 0, frontier_node);
 			} else if (n->type == NVAR) {
 				pthread_t thread;
 				struct et_args *args = malloc (sizeof *args);

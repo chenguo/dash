@@ -92,9 +92,9 @@ dg_graph_run (void)
   /* Blocks until there's nodes in the graph. */
   while (frontier->run_next == NULL)
     {
-      //TRACE(("DG GRAPH RUN: cond wait\n"));
+      TRACE(("DG GRAPH RUN: cond wait\n"));
       pthread_cond_wait (&frontier->dg_cond, &frontier->dg_lock);
-      //TRACE(("DG GRAPH RUN: cond wait complete\n"));
+      TRACE(("DG GRAPH RUN: cond wait complete\n"));
     }
   struct dg_list *ret = frontier->run_next;
   if (frontier->run_next)
@@ -504,32 +504,72 @@ dg_frontier_nonempty (void)
 
 /* Extra processing for removing NIF from frontier. */
 static void
-dg_frontier_remove_nif (struct dg_list *rem, int status)
+dg_frontier_remove_nandnor (struct dg_node *node, int status)
 {
   /* Preserve dependents. These are commands after the if with file
      collisions. */
-  struct dg_list *post_cmd = rem->node->dependents;
+  struct dg_list *post_cmd = node->dependents;
   while (post_cmd)
     {
       post_cmd->node->dependencies--;
       post_cmd = post_cmd->next;
     }
-  post_cmd = rem->node->dependents;
-  rem->node->dependents = NULL;
+  post_cmd = node->dependents;
+  node->dependents = NULL;
 
   /* Set either if or else part to run. */
-  if (status == 0)
-    TRACE(("DG FRONTIER REMOVE: if status true.\n"));
-  else
-    TRACE(("DG FRONTIER REMOVE: if status false.\n"));
-  union node *run = (status == 0)?
-    rem->node->command->nif.ifpart : rem->node->command->nif.elsepart;
-  node_proc (run, rem->node);
+  if (status == 0 && node->command->type == NAND)
+    {
+      TRACE(("DG FRONTIER REMOVE: statement 1 true.\n"));
+      node_proc (node->command->nbinary.ch2, node);
+    }
+  else if (status != 0 && node->command->type == NOR)
+    {
+      TRACE(("DG FRONTIER REMOVE: statement 2 false.\n"));
+      node_proc (node->command->nbinary.ch2, node);
+    }
 
   /* Append post commands. */
   while (post_cmd)
     {
-      post_cmd->node->dependencies = dg_dep_add (post_cmd->node, rem->node);
+      post_cmd->node->dependencies = dg_dep_add (post_cmd->node, node);
+      if (post_cmd->node->dependencies == 0)
+        dg_frontier_add (post_cmd->node);
+      post_cmd = post_cmd->next;
+    }
+}
+
+
+/* Extra processing for removing NIF from frontier. */
+static void
+dg_frontier_remove_nif (struct dg_node *node, int status)
+{
+  TRACE(("DG FRONTIER REMOVE NIF.\n"));
+
+  /* Preserve dependents. These are commands after the if with file
+     collisions. */
+  struct dg_list *post_cmd = node->dependents;
+  while (post_cmd)
+    {
+      post_cmd->node->dependencies--;
+      post_cmd = post_cmd->next;
+    }
+  post_cmd = node->dependents;
+  node->dependents = NULL;
+
+  /* Set either if or else part to run. */
+  if (status == 0)
+    TRACE(("DG FRONTIER REMOVE NIF: if true.\n"));
+  else
+    TRACE(("DG FRONTIER REMOVE: NIF: if false.\n"));
+  union node *run = (status == 0)?
+    node->command->nif.ifpart : node->command->nif.elsepart;
+  node_proc (run, node);
+
+  /* Append post commands. */
+  while (post_cmd)
+    {
+      post_cmd->node->dependencies = dg_dep_add (post_cmd->node, node);
       if (post_cmd->node->dependencies == 0)
         dg_frontier_add (post_cmd->node);
       post_cmd = post_cmd->next;
@@ -546,7 +586,9 @@ dg_frontier_remove (struct dg_list *rem, int status)
   TRACE (("DG FRONTIER REMOVE %p, status 0x%x\n", rem->node, status));
 
   if (rem->node->command->type == NIF)
-    dg_frontier_remove_nif (rem, status);
+    dg_frontier_remove_nif (rem->node, status);
+  else if (rem->node->command->type == NAND || rem->node->command->type == NOR)
+    dg_frontier_remove_nandnor (rem->node, status);
 
   if (rem->prev)
     {
@@ -614,6 +656,10 @@ free_command (union node *node)
     break;
   case NAND:
   case NOR:
+    TRACE(("FREE_COMMAND: NAND/NOR\n"));
+    if (node->nbinary.ch1)
+      free_command (node->nbinary.ch1);
+    break;
   case NSEMI:
   case NWHILE:
   case NUNTIL:
@@ -806,7 +852,21 @@ node_proc (union node *n, struct dg_node *graph_node)
     TRACE(("NODE PROC: NREDIR\n"));
     break;
   case NAND:
+    TRACE(("NODE PROC: NAND\n"));
   case NOR:
+    if (n->type == NOR)
+      TRACE(("NODE PROC: NOR\n"));
+    /* Wrap test part as background. */
+    if (n->nbinary.ch1 && n->nbinary.ch1->type != NBACKGND)
+      {
+        union node *nwrap = (union node *) malloc (sizeof (struct nredir));
+        nwrap->type = NBACKGND;
+        nwrap->nredir.n = n->nbinary.ch1;
+        nwrap->nredir.redirect = NULL;
+        n->nif.test = nwrap;
+      }
+    GRAPH_ADD(n, graph_node);
+    break;
   case NSEMI:
     TRACE(("NODE PROC: NSEMI\n"));
     if (n->nbinary.ch1)  
@@ -820,11 +880,10 @@ node_proc (union node *n, struct dg_node *graph_node)
     break;
   case NIF:
     TRACE(("NODE PROC: NIF\n"));
-    union node *nwrap;
     /* Wrap test part as background. */
     if (n->nif.test && n->nif.test->type != NBACKGND)
       {
-        nwrap = (union node *) malloc (sizeof (struct nredir));
+        union node *nwrap = (union node *) malloc (sizeof (struct nredir));
         nwrap->type = NBACKGND;
         nwrap->nredir.n = n->nif.test;
         nwrap->nredir.redirect = NULL;
