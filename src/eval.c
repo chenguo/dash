@@ -845,7 +845,6 @@ bail:
 	case CMDBUILTIN:
 		cmdenviron = varlist.list;
 		if (cmdenviron) {
-			TRACE(("EVALCOMMAND: cmdenviron\n"));
 			struct strlist *list = cmdenviron;
 			int i = VNOSET;
 			if (spclbltin > 0 || argc == 0) {
@@ -872,7 +871,6 @@ raise:
 			}
 			FORCEINTON;
 		}
-		TRACE(("EvALCOMMAND: still here\n"));
 		break;
 
 	case CMDFUNCTION:

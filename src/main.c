@@ -260,10 +260,9 @@ cmdloop(int top)
 		} else if (nflag == 0) {
 			job_warning = (job_warning == 2) ? 1 : 0;
 			numeof = 0;
-			if (n->type != NVAR) {
-				evaltree(n, 0, frontier_node);
-			}
-			else {
+			if (n->type == NIF ) {
+				evaltree (n->nif.test, 0, frontier_node);
+			} else if (n->type == NVAR) {
 				pthread_t thread;
 				struct et_args *args = malloc (sizeof *args);
 				args->node = n->nvar.com;
@@ -271,6 +270,8 @@ cmdloop(int top)
 				pthread_create (&thread, NULL, evaltree_thread,
 						args);
 				pthread_detach (thread);
+			} else if (n->type != NVAR) {
+				evaltree (n, 0, frontier_node);
 			}
 		}
 	}
@@ -305,13 +306,13 @@ parseloop (void *topp)
 		   to wrap it with NBACKGND. */
 		n = parsecmd(inter);
 		if (n == NEOF)
-			TRACE(("PARSELOOP: parsecmd ret EOF\n"));
+			TRACE(("PARSELOOP: parsecmd EOF\n"));
 		else if (n)
-			TRACE(("PARSELOOP: parsecmd ret type %d\n", n->type));
+			TRACE(("PARSELOOP: parsecmd type %d\n", n->type));
 		else
 			continue;
 
-		node_process (n);
+		node_proc (n, NULL);
 
 		skip = evalskip;
 		if (skip) {
@@ -329,6 +330,7 @@ parseloop (void *topp)
 static void *
 jobloop (void *data)
 {
+  TRACE(("JOBLOOP initiated.\n"));
   pthread_setcancelstate (PTHREAD_CANCEL_ENABLE, NULL);
 
   /* The wait that showjobs calls wont block if there aren't any child
@@ -337,7 +339,7 @@ jobloop (void *data)
   while (1)
     {
       /* This function does a condwait if frontier is empty. */
-      TRACE(("JOBLOOP: looping\n"));
+      //TRACE(("JOBLOOP: looping\n"));
       dg_frontier_nonempty ();
       showjobs(out2, SHOW_CHANGED);
       pthread_testcancel ();
@@ -354,158 +356,12 @@ evaltree_thread (void *data)
 	struct et_args *arg = (struct et_args *) data;
 	TRACE(("EVALTREE_THREAD: call evaltree.\n"));
 	evaltree (arg->node, 0, NULL);
-	dg_frontier_remove (arg->fnode);
+	/* TODO: get status? */
+	dg_frontier_remove (arg->fnode, 0);
 	free (arg);
 
 	TRACE(("EVALTREE_THREAD: return.\n"));
 	return NULL;
-}
-
-
-/* Process a node for addition into dgraph. */
-static void
-node_process(union node *n)
-{
-  /* Special case: EOF. */
-  if (n == NEOF)
-    {
-      TRACE(("Nodetype: NEOF\n"));
-      dg_graph_add (n);
-      pthread_exit(NULL);
-    }    
-  else if (!n)
-    return;
-
-  switch (n->type) {
-  case NCMD:
-    TRACE(("NODE_PROCESS: NCMD\n"));
-    int wrap = 0;
-    if (n->ncmd.args && n->ncmd.args->narg.text)
-      {
-        TRACE(("NCMD: ARGS %s\n", n->ncmd.args->narg.text));
-	
-        /* Check for commands we do NOT backgound on.
-           This includes: cd and exit.
-           TODO: think of more. */
-        if (strcmp (n->ncmd.args->narg.text, "cd") == 0
-            || strcmp (n->ncmd.args->narg.text, "exit") == 0)
-          wrap = 0;
-        else
-          wrap = 1;
-      }
-    else if (n->ncmd.assign && n->ncmd.assign->narg.text)
-      {
-        TRACE(("NCMD: ASSIGN next %p\n", n->ncmd.assign->narg.next));
-        TRACE(("NCMD: ASSIGN text %s\n", n->ncmd.assign->narg.text));
-        TRACE(("NCMD: ASSIGN bqte %p\n", n->ncmd.assign->narg.backquote));
-        struct nodelist *tmp = n->ncmd.assign->narg.backquote;
-        while (tmp)
-          {
-            TRACE(("NODELIST: type %d\n", tmp->n->type));
-            if (tmp->n->type == NCMD)
-              TRACE(("NCMD: ARGS text %s\n", tmp->n->ncmd.args->narg.text));
-            tmp = tmp->next;
-          }
-        wrap = 2;
-      }
-    else
-      wrap = 0;
-
-    if (wrap == 1)
-      {
-        TRACE(("Wrapping with NBACKGND\n"));
-        union node *nwrap = (union node *) malloc (sizeof (struct nredir));
-        nwrap->type = NBACKGND;
-        nwrap->nredir.n = n;
-        nwrap->nredir.redirect = NULL;
-        n = nwrap;
-      }
-    else if (wrap == 2)
-      {
-        TRACE(("Wrapping with NVAR\n"));
-        union node *nwrap = (union node *) malloc (sizeof (struct nvar));
-        nwrap->type = NVAR;	
-        nwrap->nvar.com = n;
-        n = nwrap;
-      }					
-
-    if (n->type != NCMD)
-      {
-	TRACE(("Nodetype: %i\n", n->type));
-        dg_graph_add (n);
-      }
-    else
-      /* NCMD: for now, only cd and exit. */
-      evaltree (n, 0, NULL);
-    break;
-  case NVAR:
-    TRACE(("NODE_PROCESS: NVAR\n"));
-    break;
-  case NPIPE:
-    TRACE(("NODE_PROCESS: NPIPE\n"));
-    break;
-  case NREDIR:
-  case NBACKGND:
-  case NSUBSHELL:
-    TRACE(("NODE_PROCESS: NREDIR\n"));
-    break;
-  case NAND:
-  case NOR:
-  case NSEMI:
-    TRACE(("NODE_PROCESS: NSEMI\n"));
-    if (n->nbinary.ch1)  
-      node_process (n->nbinary.ch1);
-    if (n->nbinary.ch2)
-      node_process (n->nbinary.ch2);
-    break;
-  case NWHILE:
-  case NUNTIL:
-    TRACE(("NODE_PROCESS: NBINARY\n"));
-    break;
-  case NIF:
-    TRACE(("NODE_PROCESS: NIF\n"));
-    if (n->nif.test)
-      {
-        TRACE(("NODE_PROCESS: nif.text->type %d\n", n->nif.test->type));
-      }
-    if (n->nif.ifpart)
-      {
-        TRACE(("NODE_PROCESS: nif.ifpart->type %d\n", n->nif.ifpart->type));
-        TRACE(("NODE_PROCESS: nsemi 1 type %d\n", n->nif.ifpart->nbinary.ch1->type));
-        TRACE(("NODE_PROCESS: nsemi 2 type %d\n", n->nif.ifpart->nbinary.ch2->type));
-      }
-    if (n->nif.elsepart)
-      {
-        TRACE(("NODE_PROCESS: nif.elsepart->type %d\n", n->nif.elsepart->type));
-      }
-    dg_graph_add (n);
-    break;
-  case NFOR:
-    break;
-  case NCASE:
-    break;
-  case NCLIST:
-    break;
-  case NDEFUN:
-  case NARG:
-    break;
-  case NTO:
-  case NCLOBBER:
-  case NFROM:
-  case NFROMTO:
-  case NAPPEND:
-    break;
-  case NTOFD:
-  case NFROMFD:
-    break;
-  case NHERE:
-  case NXHERE:
-    break;
-  case NNOT:
-    break;
-  default:
-    break;
-  }
 }
 
 

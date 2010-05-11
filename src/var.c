@@ -176,7 +176,6 @@ initvar(void)
 void
 setvar(const char *name, const char *val, int flags)
 {
-TRACE(("SETVAR name %s val %s\n", name, val));
 	char *p, *q;
 	size_t namelen;
 	char *nameeq;
@@ -270,7 +269,6 @@ setvareq(char *s, int flags)
 	if (!(flags & (VTEXTFIXED|VSTACK|VNOSAVE)))
 		s = savestr(s);
 	vp->text = s;
-TRACE(("SETVAREQ: var: %s\n", s));
 	vp->flags = flags;
 }
 

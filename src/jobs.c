@@ -512,7 +512,7 @@ start:
 	if (jp->state == JOBDONE) {
 		TRACE(("showjob: freeing job %d\n", jobno(jp)));
 		if (jp->ps0.node) {
-			dg_frontier_remove (jp->ps0.node);
+			dg_frontier_remove (jp->ps0.node, jp->ps0.status);
 			jp->ps0.node = NULL;
 		}
 		TRACE(("SHOWJOB: %d:%p call freejob\n", getpid(), jp));
@@ -557,12 +557,11 @@ showjobs(struct output *out, int mode)
 {
 	struct job *jp;
 
-//	TRACE(("showjobs(%x) called\n", mode));
+	//TRACE(("showjobs(%x) called\n", mode));
 
 	/* If not even one one job changed, there is nothing to do */
 	while (dowait(DOWAIT_BLOCK, NULL) > 0)
 		continue;
-	//dowait (DOWAIT_BLOCK, NULL);
 
 	for (jp = curjob; jp; jp = jp->prev_job) {
 		if (!(mode & SHOW_CHANGED) || jp->changed)
@@ -1012,10 +1011,8 @@ waitforjob(struct job *jp)
 	}
 #endif
 	if (! JOBS || (jp->state == JOBDONE && jp->used))
-{
-TRACE(("WAITFORJOB: %d:%p call freejob\n", getpid(), jp));
 		freejob(jp);
-}
+
 	return st;
 }
 
@@ -1035,9 +1032,9 @@ dowait(int block, struct job *job)
 	int state;
 
 	INTOFF;
-	TRACE(("dowait(%d) called\n", block));
+	//TRACE(("dowait(%d) called\n", block));
 	pid = waitproc(block, &status);
-	TRACE(("wait returns pid %d, status=%d\n", pid, status));
+	//TRACE(("wait returns pid %d, status=%d\n", pid, status));
 	if (pid <= 0)
 		goto out;
 
@@ -1160,7 +1157,6 @@ waitproc(int block, int *status)
 
 	do {
 		err = wait3(status, flags, NULL);
-		TRACE(("WAIT3: err %d\n", err));
 		if (err || !block)
 			break;
 

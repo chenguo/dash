@@ -1516,7 +1516,6 @@ setprompt(int which)
 STATIC char *
 copyfromstack (char *src)
 {
-TRACE(("COPYFROMSTACK %s\n", src));
 	int len = strlen (src) + 1;
 	char *r = malloc (len);
 	strncpy (r, src, len);

@@ -1,3 +1,5 @@
+/* By Chen Guo. */
+
 #include <pthread.h>
 
 /* Linked list of command nodes. */
@@ -11,7 +13,7 @@ struct dg_list
 /* File/var dependencies of a command. */
 struct dg_file
 {
-  char *file;                  /* Name of file or var. */
+  char *name;                  /* Name of file or var. */
   int name_size;               /* Length of the file name. */
   int rw;                      /* Read/write access. */
   struct dg_file *next;        /* Next file dependency. */
@@ -33,8 +35,9 @@ struct dg_frontier
   struct dg_list *run_list;    /* Running/runnable commands. */
   struct dg_list *run_next;    /* Next non-running runnable command. */
   struct dg_list *tail;        /* Last element in LL. */
+  int eof;                     /* EOF flag. */
   pthread_mutex_t dg_lock;     /* Lock for directed graph. */
-  pthread_cond_t dg_cond;     /* Run conditional variable */
+  pthread_cond_t dg_cond;      /* Run conditional variable */
 };
 
 void dg_graph_init (void);
@@ -43,4 +46,5 @@ void dg_graph_unlock (void);
 void dg_graph_add (union node *);
 struct dg_list *dg_graph_run (void);
 void dg_frontier_nonempty (void);
-void dg_frontier_remove (struct dg_list *);
+void dg_frontier_remove (struct dg_list *, int);
+void node_proc (union node *, struct dg_node *);

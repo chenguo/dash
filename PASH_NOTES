@@ -1,3 +1,8 @@
+MISC NOTES:
+NEOF is a dependent of EVERY node, not just every tree.
+
+
+
 Command queue: IS THIS NECESSARY?
 PROS: limit complexity of directed graph
 CON: adds complexity of its own
@@ -21,3 +26,5 @@ nif:
 	iv) Remove NIF node. Rest takes care of itself.
 
 
+TODO:
+Refactor node wrapping code in dgraph.c: node_proc
