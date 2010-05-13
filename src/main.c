@@ -84,7 +84,6 @@ static int cmdloop(int);
 static void *parseloop(void *);
 static void *jobloop(void *);
 static void *evaltree_thread(void *);
-static void node_process(union node *node);
 int main(int, char **);
 
 struct et_args

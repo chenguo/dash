@@ -8,18 +8,32 @@ While frontier runnables not full: add to directed graph from queue
 
 Implementing IF:
 
-nif:
-1) Create graph node for NIF
-2) Resolve file accesses of cond, if, and else part, add as file access of NIF
-3) NIF becomes frontier node, then running frontier node.
+Breaking up the test part:
+	Extract nodes from test part
+		Get list of nodes, call node_proc recursively.
+	Add NIF as dependent - mark that node
+	Add command to graph
+
+
+
+
+NIF:
+1) Create graph node for test part:
+	i) Add test node to graph.
+	ii) Apend if and else nodes' file access list to test node.
+2) NIF becomes frontier node, then becomes running frontier node.
+3) Test part evaluates. Depending on return, run if or else part
 4) Evaluate cond part.  meanwhile other commands may come in... what to do?
 	Add to graph. dgNIF counts as 1 dependency
-4) Cond returns status.
+5) Cond returns status.
 	i) Copy NIF's depedents list as post-commands list. Decrement their depedency count by 1 (for the now finished NIF)
 	ii) dg_dep_add either if or else part to graph. ALL these nodes are NIF's depedents.
 	iii) dg_dep_add commands from post-commands list.
 	iv) Remove NIF node. Rest takes care of itself.
 
+&&, ||:
+Similar to NIF.
+
 
 TODO:
-Refactor node wrapping code in dgraph.c: node_proc
+Refactor node wrapping codein dgraph.c: node_proc
