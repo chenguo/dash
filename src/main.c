@@ -188,7 +188,6 @@ state3:
 	if (sflag || minusc == NULL) {
 state4:	/* XXX ??? - why isn't this before the "if" statement */
 		cmdloop(1);
-TRACE(("CMDLOOP ret\n"));
 	}
 #if PROFILE
 	monitor(0);
@@ -261,7 +260,8 @@ cmdloop(int top)
 			numeof = 0;
 			if (n->type == NIF ) {
 				evaltree (n->nif.test, 0, frontier_node);
-			} else if (n->type == NAND || n->type == NOR) {
+			} else if (n->type == NAND || n->type == NOR
+				   || n->type == NWHILE || n->type == NUNTIL) {
 				evaltree (n->nbinary.ch1, 0, frontier_node);
 			} else if (n->type == NVAR) {
 				pthread_t thread;
@@ -313,7 +313,7 @@ parseloop (void *topp)
 		else
 			continue;
 
-		node_proc (n, NULL);
+		node_proc (n, NULL, FREE_CMD);
 
 		skip = evalskip;
 		if (skip) {
@@ -358,7 +358,7 @@ evaltree_thread (void *data)
 	TRACE(("EVALTREE_THREAD: call evaltree.\n"));
 	evaltree (arg->node, 0, NULL);
 	/* TODO: get status? */
-	dg_frontier_remove (arg->fnode, 0);
+	dg_frontier_done (arg->fnode, 0);
 	free (arg);
 
 	TRACE(("EVALTREE_THREAD: return.\n"));

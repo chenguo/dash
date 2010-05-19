@@ -512,7 +512,7 @@ start:
 	if (jp->state == JOBDONE) {
 		TRACE(("showjob: freeing job %d\n", jobno(jp)));
 		if (jp->ps0.node) {
-			dg_frontier_remove (jp->ps0.node, jp->ps0.status);
+			dg_frontier_done (jp->ps0.node, jp->ps0.status);
 			jp->ps0.node = NULL;
 		}
 		TRACE(("SHOWJOB: %d:%p call freejob\n", getpid(), jp));
@@ -764,9 +764,7 @@ makejob(union node *node, int nprocs, struct dg_list *dgraph_node)
 {
 	int i;
 	struct job *jp;
-	//static pthread_mutex_t joblock;
 
-	//pthread_mutex_lock (&joblock);
 	for (i = njobs, jp = jobtab ; ; jp++) {
 		if (--i < 0) {
 			jp = growjobtab();
@@ -796,7 +794,6 @@ makejob(union node *node, int nprocs, struct dg_list *dgraph_node)
 	}
 	TRACE(("makejob(0x%lx, %d) returns %%%d\n", (long)node, nprocs,
 	    jobno(jp)));
-	//pthread_mutex_unlock (&joblock);
 	return jp;
 }
 

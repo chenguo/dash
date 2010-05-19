@@ -26,6 +26,7 @@ struct dg_node
   struct dg_file *files;       /* Files/vars this command reads/writes. */
   int dependencies;            /* Number of blocking commands. */
   union node *command;         /* Command to evaluate. */
+  int flag;                    /* Flags. */
 };
 
 
@@ -40,11 +41,16 @@ struct dg_frontier
   pthread_cond_t dg_cond;      /* Run conditional variable */
 };
 
+enum
+{
+  KEEP_CMD,
+  FREE_CMD
+};
+
 void dg_graph_init (void);
-void dg_graph_lock (void);
-void dg_graph_unlock (void);
-void dg_graph_add (union node *);
+//void dg_graph_lock (void);
+//void dg_graph_unlock (void);
 struct dg_list *dg_graph_run (void);
 void dg_frontier_nonempty (void);
-void dg_frontier_remove (struct dg_list *, int);
-void node_proc (union node *, struct dg_node *);
+void dg_frontier_done (struct dg_list *, int);
+void node_proc (union node *, struct dg_node *, int flag);
