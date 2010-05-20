@@ -109,8 +109,8 @@ dg_graph_run (void)
   TRACE(("DG GRAPH RUN ret type %d\n", ret->node->command->type));
   if (frontier->run_next)
     {
-      TRACE(("DG GRAPH RUN incr run_next\n"));
       frontier->run_next = frontier->run_next->next;
+      TRACE(("DG GRAPH RUN incr run_next %p\n", frontier->run_next));
     }
   UNLOCK_GRAPH;
   return ret;
@@ -393,6 +393,8 @@ dg_node_files (union node *n)
     return dg_file_var (n);
   case NBACKGND:
     return dg_node_files (n->nredir.n);
+  case NAND:
+  case NOR:
   case NSEMI:
     {
       struct dg_file *file1 = dg_node_files (n->nbinary.ch1);
@@ -600,13 +602,11 @@ dg_frontier_done (struct dg_list *rem, int status)
         || (status != 0 && node->command->type == NUNTIL))
       {
         struct dg_list *deps = dg_frontier_dep_detach (node);
+        node_proc (node->command, node, FREE_CMD);
         node_proc (node->command->nbinary.ch2, node, KEEP_CMD);
-        node_proc (node->command, node, KEEP_CMD);
         dg_frontier_dep_attach (deps, node);
         node->flag = KEEP_CMD;
       }  
-    //else
-    //  node->flag = FREE_CMD;
     break;
   default:
     TRACE(("DG FRONTER DONE default.\n"));

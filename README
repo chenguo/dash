@@ -1,0 +1,84 @@
+Parallel Almquist Shell README
+
+INTRODUCTION
+
+  Pash, the Parallel Almquist Shell, attempts to automate parallel execution of
+commands whenever possible, without any extra effort from script writers or
+generation programs. It is based off of Dash, the Debian Almquist Shell.
+
+
+
+SUPPORTED FEATURES
+
+
+
+
+
+
+IMPLEMENTATION DETAILS
+
+  This section is technical and meant for hackers.
+
+
+Basic Implementation Details:
+
+  At its core, Pash is three loops: a command loop, a parse loop, and a reap
+loop. They are the functions cmdloop, parseloop, and jobloop in main.c,
+respectively. They all interact with the central data structure of Pash that
+makes this possible, the dependency graph.
+
+  The parse loop parses user/script input, creates an appropriate nodetree,
+and passes that nodetree to the dependency graph for processing. The command
+loop queries the dependency graph for commands that are ready to be evaluated,
+and passes them of to the evaluate module to be evaluated. The reap loop will
+free resources associated with a completed job, and remove associated data
+structures from the dependency graph. Essentially, the parse loop is the
+interface between the parser and the dependency graph, the command loop is the
+interface between the dependency graph and the evaluate module, and the reap
+loop garbage collects graph and process resources.
+
+  Regular command nodes returned by the parser are wrapped with a background
+node, thus all commands are executed in the background while Pash continues to
+process new commands. Pash will do dependency checking on a command's
+requested resources to ensure, for example, two processes are not writing to
+the same file at the same time. Resource access is the basis of the
+dependencies in the dependency graph; that is before a command can run all its
+dependencies must be free.
+
+  When a command has zero dependencies, it is entered into the "frontier,"
+which is where all runnable commands are put. Any command in the frontier is
+able to run without concern for safe file/variable or order of execution. When
+the command loop queries the graph for runnable commands, it is querying the
+frontier.
+
+
+Specific Implementation Details:
+
+  This section covers the algorithm/procedures used to handle certain commands.
+
+
+The IF statement (if):
+
+  An IF statement is represented with three nodes: test, ifpart, and elsepart.
+When an IF statement is added to the frontier, special processing is needed.
+
+  First, a nodelist is created of the nodes in the test part of the if. The
+last node in the list is marked as the "test" node, whose return value will
+determine the branching of the command. Nodes in the nodelist that have no
+dependencies are added to the frontier, while those whose resource access is
+blocked (only possible for the blocking process to be another in the if's test
+part) are appropriately added as dependents to the commands they depend on.
+Lastly, the IF nodes dependents are detached. The file list is reconstructed
+without the test part's files, and the detached dependents are attached again.
+If the reattached node has no dependents, then run a dependency check on it
+against the newly added test part's nodes.
+
+  When the test node is reaped, we know which branch to take. First, frontier
+nodes after the IF command is temporarily detached. Then, either the ifpart
+or the elsepart is converted to a nodelist and added to the graph as above.
+Then the remaining frontier nodes are attached. Then we detached the IF node's
+dependents, and check them against the newly added nodes. At this point, the
+IF node can be removed.
+
+    
+
