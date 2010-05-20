@@ -14,29 +14,22 @@
 #include "show.h"
 #include "parser.h"
 
-/* Implementation is a directed graph, nodes representing a
-   running command points to commands that much wait for the
-   running command to finish.
 
-   frontier node: nodes representing runnable commands, either
-	 currently running or not.
-   frontier: structure holding runnables list and run next.
-   runnables list: LL of frontier nodes.
-   run next: pointer to next non-running frontier node.
-
-   dependents: a node's dependents is a list of nodes representing
-	 commands that must wait for the node to finish before running.
- */
-
-static void dg_graph_add_node (struct dg_node *);
+static void dg_graph_add_node (struct dg_node *, struct dg_fnode *);
 static int dg_dep_check (struct dg_node *, struct dg_node *);
 static int dg_dep_add (struct dg_node *, struct dg_node *);
 static struct dg_file * dg_node_files (union node *);
-static struct dg_node * dg_node_create (union node *, int flag);
+static struct dg_node * dg_node_create (union node *, int flag,
+                                        struct dg_fnode *);
 static void dg_graph_remove (struct dg_node *);
+static void dg_frontier_node_proc (struct dg_fnode *);
 static void dg_frontier_set_eof (void);
 static void dg_frontier_add (struct dg_node *);
 static void free_command (union node *);
+static void free_deps (struct dg_list *);
+static void free_files (struct dg_file *);
+static void free_nodelist (struct nodelist *);
+static struct nodelist * node_list (union node *);
 
 static struct dg_frontier *frontier;
 
@@ -88,14 +81,15 @@ dg_graph_init (void)
 #define LOCK_GRAPH {pthread_mutex_lock(&frontier->dg_lock);}
 #define UNLOCK_GRAPH {pthread_mutex_unlock(&frontier->dg_lock);}
 
-/* TODO: Destroy graph. */
+/* Free graph. */
 void
 dg_graph_free (void)
 {
+  /* TODO: FILL OUT. */
 }
 
 /* Return a process in the frontier. */
-struct dg_list *
+struct dg_fnode *
 dg_graph_run (void)
 {
   LOCK_GRAPH;
@@ -105,7 +99,7 @@ dg_graph_run (void)
       TRACE(("DG GRAPH RUN wait\n"));
       pthread_cond_wait (&frontier->dg_cond, &frontier->dg_lock);
     }
-  struct dg_list *ret = frontier->run_next;
+  struct dg_fnode *ret = frontier->run_next;
   TRACE(("DG GRAPH RUN ret type %d\n", ret->node->command->type));
   if (frontier->run_next)
     {
@@ -118,52 +112,33 @@ dg_graph_run (void)
 
 /* Wrap a command with a graph node and add to graph. */
 static void
-dg_graph_add (union node *new_cmd, int flag)
+dg_graph_add (union node *new_cmd)
 {
   TRACE(("DG GRAPH ADD type %d\n", new_cmd->type));
   LOCK_GRAPH;
-  if (new_cmd == NEOF)
-    dg_frontier_set_eof ();
-  else
-    /* Create a node for this command and add to graph. */
-    dg_graph_add_node (dg_node_create (new_cmd, flag));
+  struct dg_node *new_node = dg_node_create (new_cmd, FREE_CMD, NULL);
+  dg_graph_add_node (new_node, frontier->run_list);
   UNLOCK_GRAPH;
 }
 
-/* Add GRAPH_NODE to directed graph. */
+/* Add GRAPH_NODE to directed graph, beginning the check for dependencies with
+   FRONTIER_NODE. */
 static void
-dg_graph_add_node (struct dg_node *new_node)
+dg_graph_add_node (struct dg_node *new_node, struct dg_fnode *frontier_node)
 {
   /* Step through frontier nodes and resolve dependencies. */
-  struct dg_list *iter = frontier->run_list;
+  struct dg_fnode *iter = frontier_node;
+  int new_deps = 0;
   for (; iter; iter = iter->next)
-    new_node->dependencies += dg_dep_add (new_node, iter->node);
+    {
+      new_deps = dg_dep_add (new_node, iter->node);
+      new_node->dependencies += new_deps;
+      /* If we hit a loop, and we depend on it, stop here. */
+      if ((iter->type == DG_NWHILE || iter->type == DG_NUNTIL ||
+           iter->type == DG_NFOR) && new_deps != 0)
+        return;
+    }
   TRACE(("DG GRAPH ADD NODE %p: deps %d\n", new_node, new_node->dependencies));
-  if (new_node->dependencies == 0)
-    dg_frontier_add (new_node);
-}
-
-/* Expand GRAPH_NODE's complex command into simple commands, while
-   maintaining execution order, such that the expanded commands run before
-   GRAPH_NODE's dependents. 
-
-   XXX: is this needed? Most of its responsibilities are done by the
-   dg_frontier_remove_x functions. */
-static void
-dg_graph_expand ()
-{
-}
-
-/* Insert a node as the first dependent of a particular graph node, ahead
-   of other already existing dependents. */
-static void
-dg_graph_insert (union node *cmd, struct dg_node *graph_node, int flag)
-{
-  TRACE(("DG GRAPH INSERT\n"));
-  /* Create new node for this command. */
-  struct dg_node *new_node = dg_node_create (cmd, flag);
-  new_node->dependencies += dg_dep_add (new_node, graph_node);
-  TRACE(("DG GRAPH INSERT: %p: deps %d\n", new_node, new_node->dependencies));
   if (new_node->dependencies == 0)
     dg_frontier_add (new_node);
 }
@@ -183,14 +158,10 @@ dg_graph_remove (struct dg_node *graph_node)
       if (iter->node->dependencies == 0)
         dg_frontier_add (iter->node);
     }
-  if (graph_node->flag == FREE_CMD)
+  if ((graph_node->flag & FREE_CMD) == FREE_CMD)
     free_command (graph_node->command);
-  /* OOPS only freeing first node of these lists.
-     TODO: properly free these linked lists. */
-  if (graph_node->dependents)
-    free (graph_node->dependents);
-  if (graph_node->files)
-    free (graph_node->files);
+  free_deps (graph_node->dependents);
+  free_files (graph_node->files);
   free (graph_node);
 }
 
@@ -208,15 +179,17 @@ dg_graph_remove (struct dg_node *graph_node)
 
 /* Create a node for NEW_CMD. */
 static struct dg_node *
-dg_node_create (union node *new_cmd, int flag)
+dg_node_create (union node *new_cmd, int flag, struct dg_fnode *parent)
 {
-  TRACE(("DG NODE CREATE type %d\n", new_cmd->type));
+  TRACE(("DG NODE CREATE type %d, parent %p\n", new_cmd->type, parent));
   struct dg_node *new_node = malloc (sizeof *new_node);
   new_node->dependents = NULL;
   new_node->dependencies = 0;
   new_node->command = new_cmd;
   new_node->files = dg_node_files (new_cmd);
   new_node->flag = flag;
+  TRACE(("DG NODE CREATE flag %x\n", flag));
+  new_node->parent = parent;
 
   TRACE(("DG NODE CREATE: files: "));
   struct dg_file *file = new_node->files;
@@ -231,23 +204,26 @@ dg_node_create (union node *new_cmd, int flag)
 static int
 dg_dep_check (struct dg_node *node1, struct dg_node *node2)
 {
-  TRACE(("DG FILE CHECK\n"));
+  TRACE(("DG DEP CHECK, files1 %p files2 %p\n", node1->files, node2->files));
   struct dg_file *files1 = node1->files;
   struct dg_file *files2 = node2->files;
   int collision = NO_CLASH;
   for (; files1; files1 = files1->next, files2 = node2->files)
     for (; files2; files2 = files2->next)
+     {
+      TRACE(("DG DEP CHECK %s and %s\n", files1->name, files2->name));
       /* If same file is accessed. TODO: globbing abs path instead of file name. */
       if (strcmp (files1->name, files2->name) == 0)
         {
-          TRACE(("DG FILE CHECK %s and %s match\n", files1->name, files2->name));
+          TRACE(("DG DEP CHECK %s and %s match\n", files1->name, files2->name));
           if (files1->rw == WRITE_ACCESS || files2->rw == WRITE_ACCESS)
             return WRITE_COLLISION;
           else
             collision = CONCURRENT_READ;
         }
+     }
   /* Either no files in common or concurrent read. */
-  TRACE(("DG FILE CHECK ret %d\n", collision));
+  TRACE(("DG DEP CHECK ret %d\n", collision));
   return collision;
 }
 
@@ -258,7 +234,6 @@ dg_dep_create (struct dg_node *dep)
   struct dg_list *ret = malloc (sizeof (ret));
   ret->node = dep;
   ret->next = NULL;
-  ret->prev = NULL;
   return ret;
 }
 
@@ -389,12 +364,25 @@ dg_node_files (union node *n)
       return dg_node_files (n->ncmd.redirect);
     break;
   case NVAR:
-    /* Variable assignment. */
     return dg_file_var (n);
+  case NPIPE:
+    {
+      /* TODO: resolve files. */
+      struct dg_file *flist, *ret;
+      struct nodelist *iter = n->npipe.cmdlist;
+      for (; iter; iter = iter->next)
+        {
+          flist = dg_node_files (iter->n);
+          ret = dg_file_append (flist, ret);
+        }
+      return ret;
+    }
   case NBACKGND:
     return dg_node_files (n->nredir.n);
   case NAND:
   case NOR:
+  case NWHILE:
+  case NUNTIL:
   case NSEMI:
     {
       struct dg_file *file1 = dg_node_files (n->nbinary.ch1);
@@ -409,19 +397,14 @@ dg_node_files (union node *n)
       ifpart = dg_file_append (ifpart, elsepart);
       return dg_file_append (test, ifpart);
     }
-  case NWHILE:
-  case NUNTIL:
-    {
-      struct dg_file *file1 = dg_node_files (n->nbinary.ch1);
-      struct dg_file *file2 = dg_node_files (n->nbinary.ch2);
-      return dg_file_append (file1, file2);
-    }
   case NTO:
   case NCLOBBER:
   case NFROM:
   case NFROMTO:
   case NAPPEND:
     return dg_file_reg (n);
+  case NNOT:
+    return dg_node_files (n->nnot.com);
   default:
     break;
   }
@@ -434,6 +417,7 @@ dg_node_files (union node *n)
  *
  *  Functions that manage the frontier.
  *  dg_frontier_add
+ *  dg_frontier_node_proc
  *  dg_frontier_add_eof
  *  dg_frontier_set_eof
  *  dg_frontier_nonempty
@@ -447,8 +431,7 @@ static void
 dg_frontier_add (struct dg_node *graph_node)
 {
   TRACE(("DG FRONTIER ADD %p\n", graph_node));
-  /* Allocate new runnables node. */
-  struct dg_list *new_tail = malloc (sizeof *new_tail);
+  struct dg_fnode *new_tail = malloc (sizeof *new_tail);
   if (frontier->tail)
     {
       TRACE(("DG FRONTIER ADD non-empty\n"));
@@ -466,11 +449,116 @@ dg_frontier_add (struct dg_node *graph_node)
       frontier->tail = new_tail;
       new_tail->prev = NULL;
     }
-  /* Fill out node. */
-  frontier->tail->node = graph_node;
-  frontier->tail->next = NULL;
+  new_tail->node = graph_node;
+  new_tail->next = NULL;
+  new_tail->active = 0;
+  new_tail->status = 0;
+  /* Special processing of new frontier node. */
+  dg_frontier_node_proc (new_tail);
+
   /* Send a signal to wake up blocked dg_run threads. */
   pthread_cond_broadcast (&frontier->dg_cond);
+}
+
+/* Expand a portion of a frontier node. */
+static void
+dg_frontier_expand (struct dg_fnode *parent, union node *n,
+                    struct dg_fnode *check_start, int last_flag)
+{
+  if (!n) return;
+  /* Create a node list. For each node: create node, add to frontier.
+     For last node, set as TEST_CMD. */
+  struct nodelist *commands = node_list (n);
+  struct dg_node *new_node;
+  struct nodelist *iter= commands;
+  for (; iter->next; iter = iter->next)
+    {
+      new_node = dg_node_create (iter->n, KEEP_CMD, parent);
+      dg_graph_add_node (new_node, parent);//check_start);
+      parent->active++;
+    }
+  new_node = dg_node_create (iter->n, KEEP_CMD | last_flag, parent);
+  dg_graph_add_node (new_node, parent);//check_start);
+  parent->active++;
+  free_nodelist (commands);
+}
+
+/* Recheck a compound node's dependencies after a portion of it has been
+   expanded. */
+static void
+dg_frontier_dep_recheck (struct dg_fnode *parent, struct dg_fnode *check_start)
+{
+  struct dg_list *deps = parent->node->dependents;
+  struct dg_list *iter = deps;
+  parent->node->dependents = NULL;
+  for (; iter; iter = iter->next)
+    {
+      iter->node->dependencies--;
+      dg_graph_add_node (iter->node, check_start);
+    }
+  free_deps (deps);
+}
+
+/* Process a GRAPH_NODE for addition into frontier. */
+static void
+dg_frontier_node_proc (struct dg_fnode *frontier_node)
+{
+  TRACE(("DG FRONTIER NODE PROC\n"));
+  union node *command = frontier_node->node->command;
+
+  switch (command->type) {
+  case NAND:
+  case NOR:
+    if (command->type == NAND)
+      frontier_node->type = DG_NAND;
+    else
+      frontier_node->type = DG_NOR;
+    /* Free files. */
+    free_files (frontier_node->node->files);
+    frontier_node->node->files = NULL;
+    /* Expand test command. */
+    dg_frontier_expand (frontier_node, command->nbinary.ch1,
+                        frontier_node, TEST_CMD);
+    /* Build new file list and recheck dependents. */
+    frontier_node->node->files = dg_node_files (command->nbinary.ch2);
+    dg_frontier_dep_recheck (frontier_node, frontier_node);
+    break;
+  case NIF:
+    frontier_node->type = DG_NIF;
+    /* Free files. */
+    free_files (frontier_node->node->files);
+    frontier_node->node->files = NULL;
+    /* Expand test command. */
+    dg_frontier_expand (frontier_node, command->nif.test,
+                        frontier_node, TEST_CMD);
+    /* Build new file list and recheck dependents. */
+    struct dg_file *list1 = dg_node_files (command->nif.ifpart);
+    struct dg_file *list2 = dg_node_files (command->nif.elsepart);
+    frontier_node->node->files = dg_file_append (list1, list2);
+    dg_frontier_dep_recheck (frontier_node, frontier_node);
+    break;
+  case NWHILE:
+  case NUNTIL:
+    if (command->type == NWHILE)
+      frontier_node->type = DG_NWHILE;
+    else
+      frontier_node->type = DG_NUNTIL;
+    /* Save files and dependents. */
+    struct dg_file *saved_files = frontier_node->node->files;
+    struct dg_list *saved_deps = frontier_node->node->dependents;
+    frontier_node->node->files = NULL;
+    frontier_node->node->dependents = NULL;
+    /* Expand test command. */
+    dg_frontier_expand (frontier_node, command->nbinary.ch1,
+                        frontier_node, TEST_CMD);
+    /* Restore files and dependents. */
+    frontier_node->node->files = saved_files;
+    frontier_node->node->dependents = saved_deps;
+    break;
+  default:
+    frontier_node->type = DG_NCMD;
+    break;
+  }
 }
 
 /* Add NEOF node to frontier. THIS SHOULD ONLY BE CALLED WHEN THE FRONTIER IS
@@ -506,38 +594,112 @@ dg_frontier_nonempty (void)
   return;
 }
 
-/* Detach dependents, preserving them for later use. */
-static struct dg_list *
-dg_frontier_dep_detach (struct dg_node *node)
-{
-  TRACE (("DG FRONTIER DEP DETACH.\n"));
-  struct dg_list *deps = node->dependents;
-  for (; deps; deps = deps->next)
-    deps->node->dependencies--;
-  deps = node->dependents;
-  node->dependents = NULL;
-  return deps;
-}
-
-/* Attach DEPS as dependents to NODE. */
+/* Process parent node based on return status. */
 static void
-dg_frontier_dep_attach (struct dg_list *deps, struct dg_node *node)
+dg_frontier_parent_proc (struct dg_fnode *rem)
 {
-  TRACE(("DG FRONTIER DEP ATTACH.\n"));
-  for (; deps; deps = deps->next)
+  TRACE(("DG FRONTIER PARENT PROC %p, parent %p\n", rem->node, rem->node->parent));
+  struct dg_fnode *check_start = NULL;
+  union node *expand = NULL;
+
+  struct dg_fnode *parent = rem->node->parent;
+  if (parent) parent->active--;
+  else return;
+  if (rem->node->command->type == NNOT)
+    rem->status = !rem->status;
+
+
+  if ((rem->node->flag & STATUS_CMD) == STATUS_CMD)
+    parent->status = rem->status;
+  if ((rem->node->flag & TEST_CMD) != TEST_CMD)
     {
-      deps->node->dependencies = dg_dep_add (deps->node, node);
-      if (deps->node->dependencies == 0)
-        dg_frontier_add (deps->node);
+      if (parent->active == 0)
+        dg_frontier_remove (parent);
+      return;
     }
+
+  switch (parent->type) {
+  case DG_NAND:
+  case DG_NOR:
+    TRACE(("DG FRONTIER PARENT PROC: DG_NAND/DG_NOR\n"));
+    check_start = frontier->tail;
+    /* Free files. */
+    free_files (parent->node->files);
+    parent->node->files = NULL;
+    /* Expand appropriate commands. */
+    if ((rem->status == 0 && parent->type == DG_NAND) ||
+        (rem->status != 0 && parent->type == DG_NOR))
+      dg_frontier_expand (parent, parent->node->command->nbinary.ch2,
+                          check_start, STATUS_CMD);
+    /* Recheck dependents. */
+    dg_frontier_dep_recheck (parent, parent);//check_start);
+    /* Set status to DG_NCMD to label node removable. */
+    parent->type = DG_NCMD;
+    break;
+  case DG_NIF:
+    TRACE(("DG FRONTIER PARENT PROC: DG_NIF\n"));
+    check_start = frontier->tail;
+    /* Free files. */
+    free_files (parent->node->files);
+    parent->node->files = NULL;
+    /* Expand appropriate commands. */
+    expand = (rem->status == 0)? parent->node->command->nif.ifpart
+                               : parent->node->command->nif.elsepart;
+    dg_frontier_expand (parent, expand, check_start, STATUS_CMD);
+    /* Recheck IF's dependents. */
+    dg_frontier_dep_recheck (parent, parent);//check_start);
+    /* Set status to DG_NCMD to label node removable. */
+    parent->type = DG_NCMD;
+    break;
+  case DG_NWHILE:
+  case DG_NUNTIL:
+    TRACE(("DG FRONTIER PARENT PROC: DG_NWHILE/DG_NUNTIL\n"));
+    check_start = frontier->tail;
+    /* Save files and dependencies. */
+    struct dg_file *saved_files = parent->node->files;
+    struct dg_list *saved_deps = parent->node->dependents;
+    parent->node->files = NULL;
+    parent->node->dependents = NULL;
+    /* Expand commands if appropriate. */
+    if ((rem->status == 0 && parent->type == DG_NWHILE) ||
+        (rem->status != 0 && parent->type == DG_NUNTIL))
+      {
+        dg_frontier_expand (parent, parent->node->command->nbinary.ch2,
+                            check_start, STATUS_CMD);
+        /* Recycle test condition. */
+        dg_frontier_expand (parent, parent->node->command->nbinary.ch1,
+                            check_start, TEST_CMD);
+        /* Restore files and dependents. */
+        parent->node->files = saved_files;
+        parent->node->dependents = saved_deps;
+      }
+    else
+      {
+        /* Free saved files. Recheck dependents (this requires restoring
+           them. */
+        free_files (saved_files);
+        parent->node->dependents = saved_deps;
+        dg_frontier_dep_recheck (parent, parent);//check_start);
+        /* Set status to DG_NCMD to label node removable. */
+        parent->type = DG_NCMD;
+      }
+    break;
+  default:
+    parent->status = rem->status;
+    if (parent->active == 0)
+      dg_frontier_remove (parent);
+    break;
+  }
 }
 
 /* Remove the runnables list node corresponding to a frontier
    node that has completed execution. */
-static void
-dg_frontier_remove (struct dg_list *rem)
+void
+dg_frontier_remove (struct dg_fnode *rem)
 {
-  TRACE (("DG FRONTIER REMOVE\n"));
+  LOCK_GRAPH;
+  TRACE (("DG FRONTIER REMOVE %p\n", rem->node));
+  dg_frontier_parent_proc (rem);
   if (rem->prev)
     {
       /* Node is not first in LL. */
@@ -563,56 +725,6 @@ dg_frontier_remove (struct dg_list *rem)
   free (rem);
   if (!frontier->run_list && frontier->eof)
     dg_frontier_add_eof ();
-}
-
-/* Processing node to be removed from the frontier. */
-void
-dg_frontier_done (struct dg_list *rem, int status)
-{
-  LOCK_GRAPH;
-  int type = rem->node->command->type;
-  struct dg_node *node = rem->node;
-  switch (type) {
-  case NAND:
-  case NOR:
-    TRACE(("DG FRONTIER DONE NANDNOR.\n"));
-    if ((status == 0 && node->command->type == NAND)
-        || (status != 0 && node->command->type == NOR))
-      {
-        struct dg_list *deps = dg_frontier_dep_detach (node);
-        node_proc (node->command->nbinary.ch2, node, node->flag);
-        dg_frontier_dep_attach (deps, node);
-      }
-    break;
-  case NIF:
-    {
-      TRACE(("DG FRONTIER DONE NIF.\n"));
-      struct dg_list *deps = dg_frontier_dep_detach (node);
-      if (status == 0)
-        node_proc (node->command->nif.ifpart, node, node->flag);
-      else
-        node_proc (node->command->nif.elsepart, node, node->flag);
-      dg_frontier_dep_attach (deps, node);
-    }
-    break;
-  case NWHILE:
-  case NUNTIL:
-    TRACE(("DG FRONTIER DONE NWHILE NUNTIL.\n"));
-    if ((status == 0 && node->command->type == NWHILE)
-        || (status != 0 && node->command->type == NUNTIL))
-      {
-        struct dg_list *deps = dg_frontier_dep_detach (node);
-        node_proc (node->command, node, FREE_CMD);
-        node_proc (node->command->nbinary.ch2, node, KEEP_CMD);
-        dg_frontier_dep_attach (deps, node);
-        node->flag = KEEP_CMD;
-      }  
-    break;
-  default:
-    TRACE(("DG FRONTER DONE default.\n"));
-    break;
-  }
-  dg_frontier_remove (rem);
   UNLOCK_GRAPH;
 }
 
@@ -632,89 +744,69 @@ dg_frontier_done (struct dg_list *rem, int status)
 static void
 free_command (union node *node)
 {
+  if (!node)
+    return;
+
   switch (node->type) {
   case NCMD:
     TRACE(("FREE_COMMAND: NCMD\n"));
-    if (node->ncmd.assign)
-      free_command (node->ncmd.assign);
-    if (node->ncmd.args)
-      free_command (node->ncmd.args);
-    if (node->ncmd.redirect)
-      free_command (node->ncmd.redirect);
+    free_command (node->ncmd.assign);
+    free_command (node->ncmd.args);
+    free_command (node->ncmd.redirect);
     break;
   case NVAR:
     TRACE(("FREE_COMMAND: NVAR\n"));
-    if (node->nvar.com)
-      free_command (node->nvar.com);
+    free_command (node->nvar.com);
     break;
   case NPIPE:
     TRACE(("FREE_COMMAND: NPIPE\n"));
-    if (node->npipe.cmdlist)
-      ;/*TODO: free nodelist. */
+    /*TODO: free nodelist: node->npipe.cmdlist */
     break;
   case NREDIR:
   case NBACKGND:
   case NSUBSHELL:
     TRACE(("FREE_COMMAND: NREDIR\n"));
-    if (node->nredir.n)
-      free_command (node->nredir.n);
-    if (node->nredir.redirect)
-      free_command (node->nredir.redirect);
+    free_command (node->nredir.n);
+    free_command (node->nredir.redirect);
     break;
   case NAND:
   case NOR:
-    TRACE(("FREE_COMMAND: NAND/NOR\n"));
-    if (node->nbinary.ch1)
-      free_command (node->nbinary.ch1);
-    break;
   case NSEMI:
   case NWHILE:
   case NUNTIL:
     TRACE(("FREE_COMMAND: NBINARY\n"));
-    if (node->nbinary.ch1)
-      free_command (node->nbinary.ch1);
-    if (node->nbinary.ch2)
-      free_command (node->nbinary.ch2);
+    free_command (node->nbinary.ch1);
+    free_command (node->nbinary.ch2);
     break;
   case NIF:
     TRACE(("FREE_COMMAND: NIF\n"));
-    if (node->nif.test)
-      free_command (node->nif.test);
+    free_command (node->nif.test);
+    free_command (node->nif.ifpart);
+    free_command (node->nif.elsepart);
     break;
   case NFOR:
     TRACE(("FREE_COMMAND: NFOR\n"));
-    if (node->nfor.args)
-      free_command (node->nfor.args);
-    if (node->nfor.body)
-      free_command (node->nfor.body);
-    if (node->nfor.var)
-      free (node->nfor.var);
+    free_command (node->nfor.args);
+    free_command (node->nfor.body);
+    free (node->nfor.var);
     break;
   case NCASE:
     TRACE(("FREE_COMMAND: NCASE\n"));
-    if (node->ncase.expr)
-      free_command (node->ncase.expr);
-    if (node->ncase.cases)
-      free_command (node->ncase.cases);
+    free_command (node->ncase.expr);
+    free_command (node->ncase.cases);
     break;
   case NCLIST:
     TRACE(("FREE_COMMAND: NCLIST\n"));
-    if (node->nclist.next)
-      free_command (node->nclist.next);
-    if (node->nclist.pattern)
-      free_command (node->nclist.pattern);
-    if (node->nclist.body)
-      free_command (node->nclist.body);
+    free_command (node->nclist.next);
+    free_command (node->nclist.pattern);
+    free_command (node->nclist.body);
     break;
   case NDEFUN:
   case NARG:
     TRACE(("FREE_COMMAND: NARG\n"));
-    if (node->narg.next)
-      free_command (node->narg.next);
-    if (node->narg.text)
-      free (node->narg.text);
-    if (node->narg.backquote)
-      ;/* TODO: free nodelist. */
+    free_command (node->narg.next);
+    free (node->narg.text);
+    /* TODO: free nodelist: node->narg.backquote */
     break;
   case NTO:
   case NCLOBBER:
@@ -722,38 +814,71 @@ free_command (union node *node)
   case NFROMTO:
   case NAPPEND:
     TRACE(("FREE_COMMAND: NFILE\n"));
-    if (node->nfile.next)
-      free_command (node->nfile.next);
-    if (node->nfile.fname)
-      free_command (node->nfile.fname);
-    if (node->nfile.expfname)
-      ;/* Taken care of by eval. */
-   break;
+    free_command (node->nfile.next);
+    free_command (node->nfile.fname);
+    break;
   case NTOFD:
   case NFROMFD:
     TRACE(("FREE_COMMAND: NDUP\n"));
-    if (node->ndup.next)
-      free_command (node->ndup.next);
-    if (node->ndup.vname)
-      free_command (node->ndup.vname);
+    free_command (node->ndup.next);
+    free_command (node->ndup.vname);
     break;
   case NHERE:
   case NXHERE:
     TRACE(("FREE_COMMAND: NHERE\n"));
-    if (node->nhere.next);
-      free_command (node->nhere.next);
-    if (node->nhere.doc)
-      free_command (node->nhere.doc);
+    free_command (node->nhere.next);
+    free_command (node->nhere.doc);
     break;
   case NNOT:
     TRACE(("FREE_COMMAND: NNOT\n"));
-    if (node->nnot.com)
-      free_command (node->nnot.com);
+    free_command (node->nnot.com);
     break;
   default:
     break;
   }
   free (node);
+}
+
+/* Free dependents list. */
+static void
+free_deps (struct dg_list *deps)
+{
+  TRACE(("FREE DEPS\n"));
+  struct dg_list *next;
+  while (deps)
+    {
+      next = deps->next;
+      free (deps);
+      deps = next;
+    }
+}
+
+/* Free file access list. */
+static void
+free_files (struct dg_file *files)
+{
+  TRACE(("FREE FILES\n"));
+  struct dg_file *next;
+  while (files)
+    {
+      next = files->next;
+      free (files->name);
+      free (files);
+      files = next;
+    }
+}
+
+/* Free a node list. */
+static void
+free_nodelist (struct nodelist *node_list)
+{
+  struct nodelist *next;
+  while (node_list)
+    {
+      next = node_list->next;
+      free (node_list);
+      node_list = next;
+    }
 }
 
 /* Wrap N with NBACKGND node. */
@@ -777,21 +902,31 @@ node_wrap_nvar (union node *n)
   return nwrap;
 }
 
-/* Add a command into the graph. */
-static void
-node_proc_add (union node *n, struct dg_node *graph_node, int flag)
+/* Create a nodelist. */
+static struct nodelist *
+node_list_create (union node *n)
 {
-  /* Straight add. */
-  if (!graph_node)
-    dg_graph_add (n, flag);
-  /* Insert in place of GRAPH_NODE. */
-  else
-    dg_graph_insert (n, graph_node, flag);
+  struct nodelist *ret = malloc (sizeof *ret);
+  ret->n = n;
+  ret->next = NULL;
+  return ret;
 }
 
-/* Process a command node for adding into the graph. */
-static void
-node_proc_ncmd (union node *n, struct dg_node *graph_node, int flag)
+/* Append two nodelists. */
+static struct nodelist *
+node_list_append (struct nodelist *list1, struct nodelist *list2)
+{
+  if (!list1)
+    return list2;
+  struct nodelist *iter = list1;
+  while (iter->next)
+    iter = iter->next;
+  iter->next = list2;
+  return list1;
+}
+
+static union node *
+node_proc_ncmd (union node *n)
 {
   TRACE(("NODE PROC NCMD\n"));
   if (n->ncmd.args && n->ncmd.args->narg.text)
@@ -799,68 +934,45 @@ node_proc_ncmd (union node *n, struct dg_node *graph_node, int flag)
       TRACE(("NODE PROC: NCMD: ARGS %s\n", n->ncmd.args->narg.text));
       /* Check for commands we do NOT backgound on.
          This includes: cd and exit.
-         TODO: think of more. */
+         TODO: handle more. */
       if (strcmp (n->ncmd.args->narg.text, "cd") != 0 &&
           strcmp (n->ncmd.args->narg.text, "exit") != 0)
         n = node_wrap_nbackgnd (n);
     }
   else if (n->ncmd.assign && n->ncmd.assign->narg.text)
     n = node_wrap_nvar (n);
-  /* Evaluate cd and exit, otherwise send to graph. */
-  if (n->type == NCMD)
-    evaltree (n, 0, NULL);
-  else
-    node_proc_add (n, graph_node, flag);
+  return n;
 }
 
-/* TODO: all the test conditions are handled the slow (but safe) way. Can
- *   we make them parallelize better without radically altering the directed
- *   graph? There must be some clever manipulation of frontier and graph
- *   nodes we can do.
- */
-
-/* Process an AND or OR node for adding into the graph. */
-static void
-node_proc_nandnor (union node *n, struct dg_node *graph_node, int flag)
+/* Create a list of nodes. */
+static struct nodelist *
+node_list (union node *n)
 {
-  TRACE(("NODE PROC NAND NOR\n"));
-  if (n->nbinary.ch1)
-    {
-      if (n->nbinary.ch1->type != NBACKGND)
-        n->nbinary.ch1 = node_wrap_nbackgnd (n->nbinary.ch1);
-      node_proc_add (n, graph_node, flag);
-    }
-}
+  if (n == NULL)
+    return NULL;
 
-/* Process an IF node for adding into the graph. */
-static void
-node_proc_nif (union node *n, struct dg_node *graph_node, int flag)
-{
-  TRACE(("NODE PROC NIF\n"));
-  if (n->nif.test)
+  switch (n->type) {
+  case NCMD:
+    n = node_proc_ncmd (n);
+    break;
+  case NSEMI:
     {
-      if (n->nif.test->type != NBACKGND)
-        n->nif.test = node_wrap_nbackgnd (n->nif.test);
-      node_proc_add (n, graph_node, flag);
+      struct nodelist *list1 = node_list (n->nbinary.ch1);
+      struct nodelist *list2 = node_list (n->nbinary.ch2);
+      return node_list_append (list1, list2);
     }
-}
-
-/* Process a WHILE or UNTIL node for adding into the graph. */
-static void
-node_proc_nwhilenuntil (union node *n, struct dg_node *graph_node, int flag)
-{
-  TRACE(("NODE PROC NWHILE NUNTIL\n"));
-  if (n->nbinary.ch1)
-    {
-      if (n->nbinary.ch1->type != NBACKGND)
-        n->nbinary.ch1 = node_wrap_nbackgnd (n->nbinary.ch1);
-      node_proc_add (n, graph_node, flag);
-    }
+  case NNOT:
+    if (n->nnot.com->type == NCMD)
+      n->nnot.com = node_proc_ncmd (n->nnot.com);
+  default:
+    break;
+  }
+  return node_list_create (n);
 }
 
 /* Process node tree returned by parsecmd. */
 void
-node_proc (union node *n, struct dg_node *graph_node, int flag)
+node_proc (union node *n)
 {
   /* Special case: EOF. */
   if (n == NEOF)
@@ -874,30 +986,22 @@ node_proc (union node *n, struct dg_node *graph_node, int flag)
 
   switch (n->type) {
   case NCMD:
-    node_proc_ncmd (n, graph_node, flag);
-    break;
-  case NAND:
-  case NOR:
-    node_proc_nandnor (n, graph_node, flag);
+    n = node_proc_ncmd (n);
     break;
   case NSEMI:
     TRACE(("NODE PROC: NSEMI\n"));
-    if (n->nbinary.ch1)  
-      node_proc (n->nbinary.ch1, graph_node, flag);
-    if (n->nbinary.ch2)
-      node_proc (n->nbinary.ch2, graph_node, flag);
-    break;
-  case NWHILE:
-  case NUNTIL:
-    node_proc_nwhilenuntil (n, graph_node, flag);
-    break;
-  case NIF:
-    node_proc_nif (n, graph_node, flag);
+    node_proc (n->nbinary.ch1);
+    node_proc (n->nbinary.ch2);
+    return;
+  case NNOT:
+    /* TODO: handle NOT of non-regular commands. */
+    if (n->nnot.com->type == NCMD)
+      n->nnot.com = node_proc_ncmd (n->nnot.com);
     break;
   default:
     TRACE(("NODE PROC: default, type %d\n", n->type));
     /* Pass straight through to graph. */
-    node_proc_add (n, graph_node, flag);
     break;
   }
+  dg_graph_add (n);
 }

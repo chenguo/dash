@@ -10,8 +10,33 @@ generation programs. It is based off of Dash, the Debian Almquist Shell.
 
 SUPPORTED FEATURES
 
+Regular commands.
+Background commands.
+Simple variable assignment.
+PIPE commands.
+IF statements.
+&&, || operators.
+WHILE, UNTIL loops (no CONTINUE or BREAK yet)
+CD (asynchronous)
+EXIT (asynchronous)
 
+Todo:
+FOR loops
+Make CD and EXIT synchronous.
+Check dependency via inode nubmer, file name, and file descriptor.
+Support globbing in dependency checking.
+File access check for common UNIX commands.
+BREAK
+CONTINUE
+EXEC
+EXPORT
+SET
+SHIFT
+Shell functions; RETURN
+Correctly implement ()
+correctly implement {}
 
+etc, etc. List is not exhaustive.
 
 
 
@@ -57,7 +82,13 @@ Specific Implementation Details:
   This section covers the algorithm/procedures used to handle certain commands.
 
 
-The IF statement (if):
+Regular commands:
+
+  Regular commands are wrapped with a background node, and then inserted into
+the directed graph.
+
+
+The IF statement:
 
   An IF statement is represented with three nodes: test, ifpart, and elsepart.
 When an IF statement is added to the frontier, special processing is needed.
@@ -74,11 +105,34 @@ If the reattached node has no dependents, then run a dependency check on it
 against the newly added test part's nodes.
 
   When the test node is reaped, we know which branch to take. First, frontier
-nodes after the IF command is temporarily detached. Then, either the ifpart
+nodes after the test command is temporarily detached. Then, either the ifpart
 or the elsepart is converted to a nodelist and added to the graph as above.
 Then the remaining frontier nodes are attached. Then we detached the IF node's
 dependents, and check them against the newly added nodes. At this point, the
 IF node can be removed.
 
-    
 
+The AND and OR operators (&& and ||)
+
+  These are implemented the same way as IF statements, just with the ELSE part
+missing for && and with the THEN part missing for ||.
+
+
+WHILE and UNTIL loops:
+
+  Again implementation is largely similar to the IF statement. The biggest
+difference here is, on condition success for WHILE and condition failure for
+UNTIL, instead of just expanding the body, the test portion is also expanded.
+
+  There is a subtle point with dependency checking. When a new command comes
+into the graph, and it depends on a node representing a loop, dependency
+resolution must stop. If not, the new command can become a dependent of a
+command expanded from the loop. In this case then, future expansions will end
+up being a dependent of this new command, which is an undesired outcome. This
+can entirely be avoided if we stop dependency resolution once it's been
+determined that there is a dependence on a loop. When the loop completes, it
+will then continue resolving dependencies for this command.
+
+  Also, loops must support the CONTINUE and BREAK commands. This is
+implemented with
+ 

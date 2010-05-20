@@ -89,7 +89,7 @@ int main(int, char **);
 struct et_args
 {
 	union node* node;
-	struct dg_list* fnode;
+	struct dg_fnode* fnode;
 };
 
 /*
@@ -216,7 +216,7 @@ cmdloop(int top)
 	pthread_t thread;
 	int numeof = 0;
 	struct stackmark smark;
-	struct dg_list *frontier_node;
+	struct dg_fnode *frontier_node;
 
 	TRACE(("cmdloop(%d) called\n", &top));
 #ifdef HETIO
@@ -258,11 +258,9 @@ cmdloop(int top)
 		} else if (nflag == 0) {
 			job_warning = (job_warning == 2) ? 1 : 0;
 			numeof = 0;
-			if (n->type == NIF ) {
-				evaltree (n->nif.test, 0, frontier_node);
-			} else if (n->type == NAND || n->type == NOR
-				   || n->type == NWHILE || n->type == NUNTIL) {
-				evaltree (n->nbinary.ch1, 0, frontier_node);
+			if (n->type == NIF || n->type == NAND || n->type == NOR
+			   || n->type == NWHILE || n->type == NUNTIL) {
+				; /* Do nothing. Nodes expanded in graph. */
 			} else if (n->type == NVAR) {
 				pthread_t thread;
 				struct et_args *args = malloc (sizeof *args);
@@ -271,9 +269,10 @@ cmdloop(int top)
 				pthread_create (&thread, NULL, evaltree_thread,
 						args);
 				pthread_detach (thread);
-			} else if (n->type != NVAR) {
+			} else if (n->type == NNOT) {
+				evaltree (n->nnot.com, 0, frontier_node);
+			} else 
 				evaltree (n, 0, frontier_node);
-			}
 		}
 	}
 	popstackmark(&smark);
@@ -313,7 +312,7 @@ parseloop (void *topp)
 		else
 			continue;
 
-		node_proc (n, NULL, FREE_CMD);
+		node_proc (n);
 
 		skip = evalskip;
 		if (skip) {
@@ -358,7 +357,8 @@ evaltree_thread (void *data)
 	TRACE(("EVALTREE_THREAD: call evaltree.\n"));
 	evaltree (arg->node, 0, NULL);
 	/* TODO: get status? */
-	dg_frontier_done (arg->fnode, 0);
+        arg->fnode->status = 0;
+	dg_frontier_remove (arg->fnode);
 	free (arg);
 
 	TRACE(("EVALTREE_THREAD: return.\n"));

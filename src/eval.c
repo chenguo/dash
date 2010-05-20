@@ -89,7 +89,7 @@ void evaltreenr(union node *, int) __attribute__ ((__noreturn__));
 STATIC void evalloop(union node *, int);
 STATIC void evalfor(union node *, int);
 STATIC void evalcase(union node *, int);
-STATIC void evalsubshell(union node *, int, struct dg_list *);
+STATIC void evalsubshell(union node *, int, struct dg_fnode *);
 STATIC void expredir(union node *);
 STATIC void evalpipe(union node *, int);
 #ifdef notyet
@@ -190,7 +190,7 @@ evalstring(char *s, int flags)
  */
 
 void
-evaltree(union node *n, int flags, struct dg_list *dgraph_node)
+evaltree(union node *n, int flags, struct dg_fnode *dgraph_node)
 {
 	int checkexit = 0;
 	void (*evalfn)(union node *, int);
@@ -443,7 +443,7 @@ out:
  */
 
 STATIC void
-evalsubshell(union node *n, int flags, struct dg_list *dgraph_node)
+evalsubshell(union node *n, int flags, struct dg_fnode *dgraph_node)
 {
 	struct job *jp;
 	int backgnd = (n->type == NBACKGND);

@@ -512,7 +512,8 @@ start:
 	if (jp->state == JOBDONE) {
 		TRACE(("showjob: freeing job %d\n", jobno(jp)));
 		if (jp->ps0.node) {
-			dg_frontier_done (jp->ps0.node, jp->ps0.status);
+                        jp->ps0.node->status = jp->ps0.status;
+			dg_frontier_remove (jp->ps0.node);
 			jp->ps0.node = NULL;
 		}
 		TRACE(("SHOWJOB: %d:%p call freejob\n", getpid(), jp));
@@ -760,7 +761,7 @@ err:
  */
 
 struct job *
-makejob(union node *node, int nprocs, struct dg_list *dgraph_node)
+makejob(union node *node, int nprocs, struct dg_fnode *dgraph_node)
 {
 	int i;
 	struct job *jp;
