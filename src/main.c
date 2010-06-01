@@ -78,6 +78,13 @@ short profile_buf[16384];
 extern int etext();
 #endif
 
+// Thread local storage stuff
+pthread_key_t tlskey;
+
+void tlsDestroy(void* tlsmemory) {
+	free(tlsmemory);
+}
+
 STATIC void read_profile(const char *);
 STATIC char *find_dot_file(char *);
 static int cmdloop(int);
@@ -246,7 +253,7 @@ cmdloop(int top)
 			TRACE(("CMDLOOP: pulled null\n"));
 			continue;
 		}
-		
+
 		/* showtree(n); DEBUG */
 		if (n == NEOF) {
 			if (!top || numeof >= 50)
@@ -268,6 +275,7 @@ cmdloop(int top)
 				struct et_args *args = malloc (sizeof *args);
 				args->node = n->nvar.com;
 				args->fnode = frontier_node;
+				pthread_key_create(&tlskey, tlsDestroy);
 				pthread_create (&thread, NULL, evaltree_thread,
 						args);
 				pthread_detach (thread);
@@ -275,7 +283,7 @@ cmdloop(int top)
 		}
 	}
 	popstackmark(&smark);
- 
+
 	pthread_cancel (thread);
 	pthread_join (thread, NULL);
 
@@ -304,6 +312,9 @@ parseloop (void *topp)
 		/* parsecmd returns a node. Wrap decides whether or not
 		   to wrap it with NBACKGND. */
 		n = parsecmd(inter);
+
+		TRACE(("NODE TYPE: %i\n", n->type));
+
 		if (n == NEOF)
 			TRACE(("PARSELOOP: parsecmd ret EOF\n"));
 		else if (n)
@@ -353,6 +364,13 @@ evaltree_thread (void *data)
 {
 	struct et_args *arg = (struct et_args *) data;
 	TRACE(("EVALTREE_THREAD: call evaltree.\n"));
+
+	// Allocate thread local storage and store var_queue data into it
+	void* temp = malloc(sizeof(struct var_state*) + sizeof(pthread_cond_t*));
+	pthread_setspecific(tlskey, temp);
+	void* tls = pthread_getspecific(tlskey);
+	*(struct var_state**)tls = arg->fnode->node->write_state;
+	*(pthread_cond_t**)(tls+sizeof(struct var_state*)) = arg->fnode->node->wait_cond;
 	evaltree (arg->node, 0, NULL);
 	dg_frontier_remove (arg->fnode);
 	free (arg);
@@ -372,7 +390,7 @@ node_process(union node *n)
       TRACE(("Nodetype: NEOF\n"));
       dg_graph_add (n);
       pthread_exit(NULL);
-    }    
+    }
   else if (!n)
     return;
 
@@ -383,7 +401,7 @@ node_process(union node *n)
     if (n->ncmd.args && n->ncmd.args->narg.text)
       {
         TRACE(("NCMD: ARGS %s\n", n->ncmd.args->narg.text));
-	
+
         /* Check for commands we do NOT backgound on.
            This includes: cd and exit.
            TODO: think of more. */
@@ -424,15 +442,23 @@ node_process(union node *n)
       {
         TRACE(("Wrapping with NVAR\n"));
         union node *nwrap = (union node *) malloc (sizeof (struct nvar));
-        nwrap->type = NVAR;	
+        nwrap->type = NVAR;
         nwrap->nvar.com = n;
         n = nwrap;
-      }					
+      }
 
     if (n->type != NCMD)
       {
 	TRACE(("Nodetype: %i\n", n->type));
-        dg_graph_add (n);
+        struct dg_node* new_node = dg_graph_add (n);
+
+        // Process var_queues
+        if (n->type == NVAR) {
+        	const char* var_eq = n->nvar.com->ncmd.assign->narg.text;
+			struct var* var = setvareq(var_eq, 0);
+			var_queue_write(var, new_node);
+			var_queue_dump(var);
+        }
       }
     else
       /* NCMD: for now, only cd and exit. */
@@ -453,7 +479,7 @@ node_process(union node *n)
   case NOR:
   case NSEMI:
     TRACE(("NODE_PROCESS: NSEMI\n"));
-    if (n->nbinary.ch1)  
+    if (n->nbinary.ch1)
       node_process (n->nbinary.ch1);
     if (n->nbinary.ch2)
       node_process (n->nbinary.ch2);

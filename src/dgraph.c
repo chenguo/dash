@@ -25,17 +25,11 @@
 	 commands that must wait for the node to finish before running.
  */
 
-static int dg_file_check (struct dg_node *, struct dg_node *);
-static int dg_dep_add (struct dg_node *, struct dg_node *);
-static struct dg_file * dg_node_files (union node *);
-static struct dg_node * dg_node_create (union node *);
-void dg_graph_add (union node *);
-static void dg_graph_remove (struct dg_node *);
-static void dg_frontier_add (struct dg_node *);
-void dg_frontier_remove (struct dg_list *);
-void dg_frontier_run ();
-static void free_command (union node *);
-
+struct dg_node* dg_node_create (union node *new_cmd);
+int dg_dep_add (struct dg_node *new_node, struct dg_node *node);
+void dg_frontier_add (struct dg_node *graph_node);
+struct dg_file* dg_node_files (union node *redir);
+void free_command (union node *node);
 
 static struct dg_frontier *frontier;
 
@@ -102,7 +96,7 @@ dg_graph_run (void)
 
 
 /* Add a new command to the directed graph. */
-void
+struct dg_node*
 dg_graph_add (union node *new_cmd)
 {
 	dg_graph_lock ();
@@ -136,6 +130,8 @@ dg_graph_add (union node *new_cmd)
 		dg_frontier_add (new_node);
 
 	dg_graph_unlock ();
+
+	return new_node;
 }
 
 
@@ -205,7 +201,7 @@ dg_file_check (struct dg_node *node1, struct dg_node *node2)
 /* Check if NEW_NODE is a dependent of NODE. If so, recursive call
    on NODE's dependents, or add as dependent to NODE as necessary.
    Returns total number of dependencies originating from NODE. */
-static int
+int
 dg_dep_add (struct dg_node *new_node, struct dg_node *node)
 {
   TRACE(("DG DEP ADD  %p %p\n", new_node, node));
@@ -262,7 +258,7 @@ dg_dep_add (struct dg_node *new_node, struct dg_node *node)
 
 
 /* Create a node for NEW_CMD. */
-static struct dg_node *
+struct dg_node *
 dg_node_create (union node *new_cmd)
 {
   TRACE(("DG NODE CREATE\n"));
@@ -273,6 +269,10 @@ dg_node_create (union node *new_cmd)
   new_node->dependents = NULL;
   new_node->dependencies = 0;
   new_node->command = new_cmd;
+
+  // Initialize deferred variable states
+  new_node->wait_cond = NULL;
+  new_node->write_state = NULL;
 
   union node *flist;
   if (new_cmd->type == NBACKGND)
@@ -310,7 +310,7 @@ dg_node_create (union node *new_cmd)
 
 
 /* Construct file access list for a command. */
-static struct dg_file *
+struct dg_file *
 dg_node_files (union node *redir)
 {
   TRACE(("DG NODE FILES\n"));
@@ -352,7 +352,7 @@ dg_node_files (union node *redir)
 
 
 /* Add a node to frontier. */
-static void
+void
 dg_frontier_add (struct dg_node *graph_node)
 {
   TRACE(("DG FRONTIER ADD\n"));
@@ -476,7 +476,7 @@ dg_frontier_remove (struct dg_list *rem)
 
 
 /* Free node tree returned by parsecmd. */
-static void
+void
 free_command (union node *node)
 {
   switch (node->type) {

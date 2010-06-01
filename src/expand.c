@@ -409,7 +409,7 @@ lose:
 }
 
 
-void 
+void
 removerecordregions(int endoff)
 {
 	if (ifslastp == NULL)
@@ -432,7 +432,7 @@ removerecordregions(int endoff)
 		}
 		return;
 	}
-	
+
 	ifslastp = &ifsfirst;
 	while (ifslastp->next && ifslastp->next->begoff < endoff)
 		ifslastp=ifslastp->next;
@@ -721,6 +721,7 @@ subevalvar(char *p, char *str, int strloc, int subtype, int startloc, int varfla
 STATIC char *
 evalvar(char *p, int flag)
 {
+	TRACE(("EVALVAR: %s\n", p));
 	int subtype;
 	int varflags;
 	char *var;
@@ -769,9 +770,9 @@ vsplus:
 			if (subevalvar(p, var, 0, subtype, startloc,
 				       varflags, flag & ~QUOTES_ESC)) {
 				varflags &= ~VSNUL;
-				/* 
-				 * Remove any recorded regions beyond 
-				 * start of variable 
+				/*
+				 * Remove any recorded regions beyond
+				 * start of variable
 				 */
 				removerecordregions(startloc);
 				goto again;

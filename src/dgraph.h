@@ -1,5 +1,7 @@
 #include <pthread.h>
 
+struct var_state;
+
 /* Linked list of command nodes. */
 struct dg_list
 {
@@ -24,6 +26,9 @@ struct dg_node
   struct dg_file *files;       /* Files/vars this command reads/writes. */
   int dependencies;            /* Number of blocking commands. */
   union node *command;         /* Command to evaluate. */
+  // Deferred variable data
+  struct var_state* write_state; /* The variable state that this command will write to. */
+  pthread_cond_t* wait_cond;      /* Condition to wait on */
 };
 
 
@@ -40,7 +45,7 @@ struct dg_frontier
 void dg_graph_init (void);
 void dg_graph_lock (void);
 void dg_graph_unlock (void);
-void dg_graph_add (union node *);
+struct dg_node* dg_graph_add (union node *);
 struct dg_list *dg_graph_run (void);
 void dg_frontier_nonempty (void);
 void dg_frontier_remove (struct dg_list *);

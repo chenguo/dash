@@ -51,6 +51,13 @@
 #define VNOSET		0x80	/* do not set variable - just readonly test */
 #define VNOSAVE		0x100	/* when text is on the heap before setvareq */
 
+struct dg_node;
+
+struct var_state {
+	struct var_state* next;
+	const char* text;
+	pthread_cond_t var_cond;
+};
 
 struct var {
 	struct var *next;		/* next entry in hash list */
@@ -59,6 +66,8 @@ struct var {
 	void (*func)(const char *);
 					/* function to be called when  */
 					/* the variable gets set/unset */
+
+	struct var_state* states; // State queue for deferred variable implementation
 };
 
 
@@ -67,7 +76,21 @@ struct localvar {
 	struct var *vp;			/* the variable that was made local */
 	int flags;			/* saved flags */
 	const char *text;		/* saved text */
+	struct var_state* states; // State queue for deferred variable implementation
 };
+
+
+
+// Deferred variable functions (probably called in parser.c)
+
+// Queues up a write position in a variables state_queue.
+void var_queue_write(struct var* v, struct dg_node* cmd);
+
+// Set a command to wait on a certain state of v
+void var_queue_read(struct var* v, struct dg_node* cmd);
+
+// Output var queue for var into trace
+void var_queue_dump(struct var* v);
 
 
 extern struct localvar *localvars;
@@ -128,7 +151,7 @@ extern const char defpathvar[];
 void initvar(void);
 void setvar(const char *, const char *, int);
 intmax_t setvarint(const char *, intmax_t, int);
-void setvareq(char *, int);
+struct var* setvareq(char *, int);
 struct strlist;
 void listsetvar(struct strlist *, int);
 char *lookupvar(const char *);

@@ -35,6 +35,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <paths.h>
+#include <pthread.h>
 
 /*
  * Shell variables.
@@ -59,6 +60,8 @@
 #include "myhistedit.h"
 #endif
 #include "system.h"
+
+#include "dgraph.h"
 
 
 #define VTABSIZE 39
@@ -104,6 +107,8 @@ STATIC struct var **hashvar(const char *);
 STATIC int vpcmp(const void *, const void *);
 STATIC struct var **findvar(struct var **, const char *);
 
+extern pthread_key_t tlskey;
+
 /*
  * Initialize the varable symbol tables and import the environment
  */
@@ -141,6 +146,59 @@ INIT {
 }
 #endif
 
+/* Deferred variable functions (probably called in parser.c) */
+
+// Queues up a write position in a variables state queue.
+void var_queue_write(struct var* v, struct dg_node* cmd) {
+	// Allocate a new var_state
+	struct var_state* temp = malloc(sizeof(struct var_state));
+	if (temp == NULL) {
+		return;
+	}
+
+	// Initialize var_state variable
+	temp->next = NULL;
+	temp->text = NULL;
+	pthread_cond_init(&temp->var_cond, NULL);
+
+	// Tell command node which variable state its writing to
+	cmd->write_state = temp;
+
+	// Add var_state to variable
+	if (v->states == NULL) {
+		v->states = temp;
+	}
+	else {
+		// Find the end of the state queue list
+		struct var_state* tail = v->states;
+		while (tail->next != NULL) {
+			tail = tail->next;
+		}
+		tail->next = temp;
+	}
+}
+
+// Set a command to wait on a certain state of v
+void var_queue_read(struct var* v, struct dg_node* cmd) {
+	// Find the end of the var_state list
+	struct var_state* tail = v->states;
+	while (tail->next != NULL) {
+		tail = tail->next;
+	}
+	// Sets command to wait on conditional variable
+	// associated with the variable state it needs
+	cmd->wait_cond = &tail->var_cond;
+}
+
+// Output var queue for var into trace
+void var_queue_dump(struct var* v) {
+	TRACE(("VAR_QUEUE_DUMP for %s\n", v->text));
+	struct var_state* states = v->states;
+	while (states != NULL) {
+		TRACE(("    %s\n", states->text));
+		states = states->next;
+	}
+}
 
 /*
  * This routine initializes the builtin variables.  It is called when the
@@ -229,7 +287,7 @@ intmax_t setvarint(const char *name, intmax_t val, int flags)
  * Called with interrupts off.
  */
 
-void
+struct var*
 setvareq(char *s, int flags)
 {
 	struct var *vp, **vpp;
@@ -249,7 +307,7 @@ setvareq(char *s, int flags)
 		}
 
 		if (flags & VNOSET)
-			return;
+			return vp;
 
 		if (vp->func && (flags & VNOFUNC) == 0)
 			(*vp->func)(strchrnul(s, '=') + 1);
@@ -260,7 +318,7 @@ setvareq(char *s, int flags)
 		flags |= vp->flags & ~(VTEXTFIXED|VSTACK|VNOSAVE|VUNSET);
 	} else {
 		if (flags & VNOSET)
-			return;
+			return vp;
 		/* not found */
 		vp = ckmalloc(sizeof (*vp));
 		vp->next = *vpp;
@@ -272,6 +330,15 @@ setvareq(char *s, int flags)
 	vp->text = s;
 TRACE(("SETVAREQ: var: %s\n", s));
 	vp->flags = flags;
+
+	// Write to variable state for this process.
+	void *tls = pthread_getspecific(tlskey);
+	struct var_state* write_state = *(struct var_state**)tls;
+	write_state->text = savestr(vp->text);
+	pthread_cond_signal(&write_state->var_cond);
+
+
+	return vp;
 }
 
 
@@ -595,8 +662,17 @@ unsetvar(const char *s)
 			goto ok;
 		if ((flags & VSTRFIXED) == 0) {
 			INTOFF;
-			if ((flags & (VTEXTFIXED|VSTACK)) == 0)
+			if ((flags & (VTEXTFIXED|VSTACK)) == 0) {
 				ckfree(vp->text);
+				// Free var_queues
+				struct var_state* freelist = vp->states;
+				while (freelist != NULL) {
+					struct var_state* temp = freelist;
+					freelist = freelist->next;
+					free(temp->text);
+					free(temp);
+				}
+			}
 			*vpp = vp->next;
 			ckfree(vp);
 			INTON;
