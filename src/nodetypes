@@ -50,6 +50,8 @@
 # the field.
 
 NCMD ncmd			# a simple command
+NCONT ncmd			# a continue command
+NBREAK ncmd			# a break command
 	type	  int
 	assign    nodeptr		# variable assignments
 	args	  nodeptr		# the arguments

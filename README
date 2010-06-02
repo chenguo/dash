@@ -23,7 +23,7 @@ EXIT (asynchronous)
 Todo:
 FOR loops
 Make CD and EXIT synchronous.
-Check dependency via inode nubmer, file name, and file descriptor.
+Check dependency via inode number, file name, and file descriptor.
 Support globbing in dependency checking.
 File access check for common UNIX commands.
 BREAK

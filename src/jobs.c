@@ -96,7 +96,10 @@ static int ttyfd = -1;
 static struct job *curjob;
 /* number of presumed living untracked jobs */
 static int jobless;
+/* mutex for jobs */
+static pthread_mutex_t joblock;
 
+void job_init (void);
 STATIC void set_curjob(struct job *, unsigned);
 STATIC int jobno(const struct job *);
 STATIC int sprint_status(char *, int, int);
@@ -122,17 +125,30 @@ static int restartjob(struct job *, int);
 static void xtcsetpgrp(int, pid_t);
 #endif
 
+void job_init (void)
+{
+  pthread_mutexattr_t *attr = malloc (sizeof *attr);
+  pthread_mutexattr_init (attr);
+  pthread_mutexattr_settype (attr, PTHREAD_MUTEX_RECURSIVE);
+  pthread_mutex_init (&joblock, attr);
+}
+
+//#define LOCK_JOB {TRACE(("LOCK JOB: ATTEMPT LOCK\n"));pthread_mutex_lock(&joblock);TRACE(("LOCK JOB: LOCKED\n"));}
+#define LOCK_JOB {pthread_mutex_lock(&joblock);}
+#define UNLOCK_JOB {pthread_mutex_unlock(&joblock);}
+
 STATIC void
 set_curjob(struct job *jp, unsigned mode)
 {
 	struct job *jp1;
 	struct job **jpp, **curp;
 
+	LOCK_JOB;
 	/* first remove from list */
 	jpp = curp = &curjob;
 	do {
 		jp1 = *jpp;
-		if (jp1 == jp)
+		if (jp1 == jp || !jp1)
 			break;
 		jpp = &jp1->prev_job;
 	} while (1);
@@ -167,6 +183,7 @@ set_curjob(struct job *jp, unsigned mode)
 		*jpp = jp;
 		break;
 	}
+	UNLOCK_JOB;
 }
 
 #if JOBS
@@ -190,6 +207,7 @@ setjobctl(int on)
 
 	if (on == jobctl || rootshell == 0)
 		return;
+	LOCK_JOB;
 	if (on) {
 		int ofd;
 		ofd = fd = open(_PATH_TTY, O_RDWR);
@@ -234,6 +252,7 @@ close:
 	}
 	ttyfd = fd;
 	jobctl = on;
+	UNLOCK_JOB;
 }
 #endif
 
@@ -349,6 +368,7 @@ fgcmd(int argc, char **argv)
 	int mode;
 	int retval;
 
+	LOCK_JOB;
 	mode = (**argv == 'f') ? FORK_FG : FORK_BG;
 	nextopt(nullstr);
 	argv = argptr;
@@ -363,6 +383,7 @@ fgcmd(int argc, char **argv)
 		showpipe(jp, out);
 		retval = restartjob(jp, mode);
 	} while (*argv && *++argv);
+	UNLOCK_JOB;
 	return retval;
 }
 
@@ -385,6 +406,7 @@ restartjob(struct job *jp, int mode)
 	pid_t pgid;
 
 	INTOFF;
+	LOCK_JOB;
 	if (jp->state == JOBDONE)
 		goto out;
 	jp->state = JOBRUNNING;
@@ -402,6 +424,7 @@ restartjob(struct job *jp, int mode)
 out:
 	status = (mode == FORK_FG) ? waitforjob(jp) : 0;
 	INTON;
+	UNLOCK_JOB;
 	return status;
 }
 #endif
@@ -453,11 +476,13 @@ showjob(struct output *out, struct job *jp, int mode)
 	int indent;
 	char s[80];
 
+	LOCK_JOB;
 	ps = jp->ps;
 
 	if (mode & SHOW_PGID) {
 		/* just output process (group) id of pipeline */
 		outfmt(out, "%d\n", ps->pid);
+	        UNLOCK_JOB;
 		return;
 	}
 
@@ -512,6 +537,7 @@ start:
 	if (jp->state == JOBDONE) {
 		TRACE(("showjob: freeing job %d\n", jobno(jp)));
 		if (jp->ps0.node) {
+			TRACE(("SHOWJOB: removing %p\n", jp->ps0.node->node));
                         jp->ps0.node->status = jp->ps0.status;
 			dg_frontier_remove (jp->ps0.node);
 			jp->ps0.node = NULL;
@@ -519,6 +545,7 @@ start:
 		TRACE(("SHOWJOB: %d:%p call freejob\n", getpid(), jp));
 		freejob(jp);
 	}
+	UNLOCK_JOB;
 }
 
 
@@ -564,10 +591,12 @@ showjobs(struct output *out, int mode)
 	while (dowait(DOWAIT_BLOCK, NULL) > 0)
 		continue;
 
+	LOCK_JOB;
 	for (jp = curjob; jp; jp = jp->prev_job) {
 		if (!(mode & SHOW_CHANGED) || jp->changed)
 			showjob(out, jp, mode);
 	}
+	UNLOCK_JOB;
 }
 
 /*
@@ -580,11 +609,10 @@ freejob(struct job *jp)
 	TRACE(("FREEJOB %d:%p\n", getpid(), jp));
 	struct procstat *ps;
 	int i;
-	static pthread_mutex_t joblock = PTHREAD_MUTEX_INITIALIZER;
 
-	pthread_mutex_lock (&joblock);
+	LOCK_JOB;
 	if (!jp->used || jp->state != JOBDONE) {
-		pthread_mutex_unlock (&joblock);
+		UNLOCK_JOB;
 		return;
 	}
 
@@ -599,7 +627,8 @@ freejob(struct job *jp)
 	jp->used = 0;
 	set_curjob(jp, CUR_DELETE);
 	INTON;
-	pthread_mutex_unlock (&joblock);
+	UNLOCK_JOB;
+	TRACE(("FREEJOB DONE\n"));
 }
 
 
@@ -614,6 +643,7 @@ waitcmd(int argc, char **argv)
 	nextopt(nullstr);
 	retval = 0;
 
+	LOCK_JOB;
 	argv = argptr;
 	if (!*argv) {
 		/* wait for all jobs */
@@ -661,6 +691,7 @@ repeat:
 	} while (*++argv);
 
 out:
+	UNLOCK_JOB;
 	return retval;
 
 sigout:
@@ -685,6 +716,7 @@ getjob(const char *name, int getctl)
 	const char *p;
 	char *(*match)(const char *, const char *);
 
+	LOCK_JOB;
 	jp = curjob;
 	p = name;
 	if (!p)
@@ -748,6 +780,7 @@ gotit:
 	if (getctl && jp->jobctl == 0)
 		goto err;
 #endif
+	UNLOCK_JOB;
 	return jp;
 err:
 	sh_error(err_msg, name);
@@ -766,6 +799,7 @@ makejob(union node *node, int nprocs, struct dg_fnode *dgraph_node)
 	int i;
 	struct job *jp;
 
+	LOCK_JOB;
 	for (i = njobs, jp = jobtab ; ; jp++) {
 		if (--i < 0) {
 			jp = growjobtab();
@@ -795,6 +829,7 @@ makejob(union node *node, int nprocs, struct dg_fnode *dgraph_node)
 	}
 	TRACE(("makejob(0x%lx, %d) returns %%%d\n", (long)node, nprocs,
 	    jobno(jp)));
+	UNLOCK_JOB;
 	return jp;
 }
 
@@ -805,6 +840,7 @@ growjobtab(void)
 	ptrdiff_t offset;
 	struct job *jp, *jq;
 
+	LOCK_JOB;
 	len = njobs * sizeof(*jp);
 	jq = jobtab;
 	jp = ckrealloc(jq, len + 4 * sizeof(*jp));
@@ -838,6 +874,7 @@ growjobtab(void)
 	do {
 		jq->used = 0;
 	} while (--jq >= jp);
+	UNLOCK_JOB;
 	return jp;
 }
 
@@ -988,6 +1025,7 @@ waitforjob(struct job *jp)
 {
 	int st;
 
+	LOCK_JOB;
 	TRACE(("waitforjob(%%%d) called\n", jobno(jp)));
 	while (jp->state == JOBRUNNING) {
 		dowait(DOWAIT_BLOCK, jp);
@@ -1011,6 +1049,7 @@ waitforjob(struct job *jp)
 	if (! JOBS || (jp->state == JOBDONE && jp->used))
 		freejob(jp);
 
+	UNLOCK_JOB;
 	return st;
 }
 

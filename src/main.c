@@ -213,7 +213,7 @@ static int
 cmdloop(int top)
 {
 	union node *n;
-	pthread_t thread;
+	pthread_t parse_thread, job_thread;
 	int numeof = 0;
 	struct stackmark smark;
 	struct dg_fnode *frontier_node;
@@ -227,12 +227,13 @@ cmdloop(int top)
 	setstackmark(&smark);
 
 	dg_graph_init();
+	job_init();
 	/* Start parseloop. */
-	pthread_create (&thread, NULL, parseloop, (void *) &top);
-	pthread_detach (thread);
+	pthread_create (&parse_thread, NULL, parseloop, (void *) &top);
+	pthread_detach (parse_thread);
 
 	/* Start jobloop. */
-	pthread_create (&thread, NULL, jobloop, NULL);
+	pthread_create (&job_thread, NULL, jobloop, NULL);
 
 	while (1) {
 		frontier_node = dg_graph_run();
@@ -276,9 +277,11 @@ cmdloop(int top)
 		}
 	}
 	popstackmark(&smark);
- 
-	pthread_cancel (thread);
-	pthread_join (thread, NULL);
+
+	pthread_cancel (job_thread);
+	pthread_join (job_thread, NULL);
+	TRACE(("JOBLOOP return\n")); 
+	TRACE(("CMDLOOP exited\n")); 
 
 	return 0;
 }
@@ -313,6 +316,8 @@ parseloop (void *topp)
 			continue;
 
 		node_proc (n);
+		if (n == NEOF)
+                  break;
 
 		skip = evalskip;
 		if (skip) {

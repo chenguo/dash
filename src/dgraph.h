@@ -1,4 +1,6 @@
 /* By Chen Guo. */
+#ifndef DGRAPH_H
+#define DGRAPH_H
 
 #include <pthread.h>
 
@@ -14,62 +16,73 @@ struct dg_file
 {
   char *name;                  /* Name of file or var. */
   int name_size;               /* Length of the file name. */
-  int rw;                      /* Read/write access. */
+  int flag;                    /* Read/write/continue/break. */
   struct dg_file *next;        /* Next file dependency. */
 };
 
+/* Dependency flags. */
+enum
+{
+  READ_ACCESS,
+  WRITE_ACCESS,
+  CONTINUE,
+  BREAK
+};
+
 /* Graph node flags. */
-#define KEEP_CMD     0
-#define FREE_CMD     0b1
-#define TEST_CMD     0b10
-#define STATUS_CMD   0b100
+#define KEEP_CMD     0x00
+#define FREE_CMD     0x01
+#define TEST_CMD     0x02
+#define BODY_CMD     0x04
+#define TEST_STATUS  0x08
+#define BODY_STATUS  0x10
+#define CANCELLED    0x20
 
 struct dg_fnode;
 
 /* Node of directed command graph. */
+/* TODO: make a union. For example, regular commands don't need parent,
+   and only loop commands need nest level and iteration number. */
 struct dg_node
 {
   struct dg_list *dependents;  /* Commands dependent on this one. */
   struct dg_file *files;       /* Files/vars this command reads/writes. */
   int dependencies;            /* Number of blocking commands. */
   union node *command;         /* Command to evaluate. */
-  struct dg_fnode *parent;     /* Parent to relay return status to. */
-  int flag;                    /* Flags. */
+  struct dg_fnode *parent;     /* Parent command (IF, WHILE, etc). */
+  int nest;                    /* Loop nest level. 0 is base. */
+  unsigned long iteration;     /* Iteration number of the parent loop. */
+  int flag;                    /* Flags:
+                                    KEEP_CMD: part of node tree, don't free.
+                                    FREE_CMD: free commnd.
+                                    TEST_CMD: part of test condition.
+                                    BODY_CMD: body command.
+                                    TEST_STATUS: status is test status.
+                                    BODY_STATUS: body status. */
 };
 
 /* Frontier node types. */
 enum
 {
-  DG_NCMD,
-  DG_NAND,
-  DG_NOR,
-  DG_NIF,
-  DG_NWHILE,
-  DG_NUNTIL,
-  DG_NFOR
+  DG_NCMD,                     /* Regular command. */
+  DG_NAND,                     /* && */
+  DG_NOR,                      /* || */
+  DG_NIF,                      /* IF */
+  DG_NWHILE,                   /* WHILE */
+  DG_NUNTIL,                   /* UNTIL */
+  DG_NFOR                      /* FOR */
 };
 
-/* Frontier node for regular commands. */
+/* Frontier node. */
 struct dg_fnode
 {
-  int type;
-  struct dg_node *node;
-  struct dg_fnode *next;
-  struct dg_fnode *prev;
-  int active;
-  int status;
-};
-
-/* TODO: loop commands and loop body commands need to be
-   fleshed out. */
-/* Frontier node for a loop command. */
-struct dg_fnode_loop
-{
-  int type;
-  struct dg_node *node;
-  struct dg_fnode *next;
-  struct dg_fnode *prev;
-  int active;
+  int type;                    /* Type. */
+  struct dg_node *node;        /* Graph node. */
+  struct dg_fnode *next;       /* Next frontier node. */
+  struct dg_fnode *prev;       /* Previous frontier node. */
+  int status;                  /* Return status. */
+  int active;                  /* Active nested commands. */
+  unsigned long iteration;     /* Iteration number of loop command. */
 };
 
 /* Frontier of directed command graph. */
@@ -88,3 +101,5 @@ struct dg_fnode *dg_graph_run (void);
 void dg_frontier_nonempty (void);
 void dg_frontier_remove (struct dg_fnode *);
 void node_proc (union node *);
+
+#endif
