@@ -53,11 +53,13 @@
 #define T_INT 4			/* int field */
 #define T_OTHER 5		/* other */
 #define T_TEMP 6		/* don't copy this field */
+#define T_STATE 7		/* struct var_state *field */
+#define T_STATELIST 8		/* struct state_list *field */
 
 
 struct field {			/* a structure field */
 	char *name;		/* name of field */
-	int type;			/* type of field */
+	int type;		/* type of field */
 	char *decl;		/* declaration of field */
 };
 
@@ -174,6 +176,12 @@ parsefield(void)
 	} else if (strcmp(type, "nodelist") == 0) {
 		fp->type = T_NODELIST;
 		sprintf(decl, "struct nodelist *%s", name);
+	} else if (strcmp (type, "stateptr") == 0) {
+		fp->type = T_STATE;
+		sprintf(decl, "struct var_state *%s", name);
+	} else if (strcmp (type, "statelist") == 0) {
+ 		fp->type = T_STATELIST;
+		sprintf(decl, "struct state_list *%s", name);
 	} else if (strcmp(type, "string") == 0) {
 		fp->type = T_STRING;
 		sprintf(decl, "char *%s", name);
@@ -340,6 +348,8 @@ outfunc(FILE *cfile, int calcsize)
 						sp->tag, fp->name, sp->tag, fp->name);
 				}
 				break;
+			case T_STATE:
+			case T_STATELIST:
 			case T_INT:
 			case T_OTHER:
 				if (! calcsize) {

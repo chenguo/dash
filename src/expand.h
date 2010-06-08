@@ -36,6 +36,8 @@
 
 #include <stdint.h>
 
+#include "dgraph.h"
+
 struct strlist {
 	struct strlist *next;
 	char *text;
@@ -62,7 +64,7 @@ struct arglist {
 
 
 union node;
-void expandarg(union node *, struct arglist *, int);
+void expandarg(union node *, struct arglist *, int, struct dg_node *);
 void expari(int);
 #define rmescapes(p) _rmescapes((p), 0)
 char *_rmescapes(char *, int);

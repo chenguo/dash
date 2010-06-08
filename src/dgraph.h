@@ -2,6 +2,7 @@
 #ifndef DGRAPH_H
 #define DGRAPH_H
 
+#include <stdbool.h>
 #include <pthread.h>
 
 /* Linked list of command nodes. */
@@ -11,23 +12,30 @@ struct dg_list
   struct dg_list *next;        /* Next node in list. */
 };
 
-/* File/var dependencies of a command. */
-struct dg_file
+/* Dependency types. */
+enum { REG_FILE, CONTINUE, BREAK, WILDCARD };
+
+/* File dependencies of a command. */
+struct f_dep
 {
-  char *name;                  /* Name of file or var. */
+  int type;                    /* Type. */
+  char *name;                  /* Name of file. */
   int name_size;               /* Length of the file name. */
-  int flag;                    /* Read/write/continue/break. */
-  struct dg_file *next;        /* Next file dependency. */
+  bool write;                  /* Read/write, true if write. */
 };
 
-/* Dependency flags. */
-enum
+/* File dependency. */
+struct dg_file
 {
-  READ_ACCESS,
-  WRITE_ACCESS,
-  CONTINUE,
-  BREAK
+  int type;
+  struct dg_file *next;
+  union
+    {
+      int nest;                /* For CONTINUE/BREAK. */
+      struct f_dep *file;      /* For regular files. */
+    };
 };
+
 
 /* Graph node flags. */
 #define KEEP_CMD     0x00
@@ -46,7 +54,7 @@ struct dg_fnode;
 struct dg_node
 {
   struct dg_list *dependents;  /* Commands dependent on this one. */
-  struct dg_file *files;       /* Files/vars this command reads/writes. */
+  struct dg_file *files;        /* Files/vars this command reads/writes. */
   int dependencies;            /* Number of blocking commands. */
   union node *command;         /* Command to evaluate. */
   struct dg_fnode *parent;     /* Parent command (IF, WHILE, etc). */
@@ -98,6 +106,7 @@ struct dg_frontier
 
 void dg_graph_init (void);
 struct dg_fnode *dg_graph_run (void);
+void dg_node_dep_decr (struct dg_node *);
 void dg_frontier_nonempty (void);
 void dg_frontier_remove (struct dg_fnode *);
 void node_proc (union node *);

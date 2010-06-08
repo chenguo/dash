@@ -60,6 +60,7 @@
 #include "error.h"
 #include "show.h"
 #include "mystring.h"
+#include "states.h"
 #ifndef SMALL
 #include "myhistedit.h"
 #endif
@@ -92,6 +93,7 @@ STATIC void evalcase(union node *, int);
 STATIC void evalsubshell(union node *, int, struct dg_fnode *);
 STATIC void expredir(union node *);
 STATIC void evalpipe(union node *, int);
+STATIC void evalvarw(union node *, int);
 #ifdef notyet
 STATIC void evalcommand(union node *, int, struct backcmd *);
 #else
@@ -239,6 +241,9 @@ checkexit:
 			checkexit = ~0;
 		goto calleval;
 #endif
+	case NVARW:
+		evalfn = evalvarw;
+		goto calleval;
 	case NFOR:
 		evalfn = evalfor;
 		goto calleval;
@@ -380,12 +385,15 @@ evalfor(union node *n, int flags)
 	setstackmark(&smark);
 	arglist.lastp = &arglist.list;
 	for (argp = n->nfor.args ; argp ; argp = argp->narg.next) {
-		expandarg(argp, &arglist, EXP_FULL | EXP_TILDE);
+		expandarg(argp, &arglist, EXP_FULL | EXP_TILDE, NULL);
 		/* XXX */
 		if (evalskip)
 			goto out;
 	}
 	*arglist.lastp = NULL;
+
+	for (sp = arglist.list; sp; sp = sp->next)
+		TRACE(("EVALFOR: args %s\n", sp->text));
 
 	exitstatus = 0;
 	loopnest++;
@@ -420,7 +428,7 @@ evalcase(union node *n, int flags)
 
 	setstackmark(&smark);
 	arglist.lastp = &arglist.list;
-	expandarg(n->ncase.expr, &arglist, EXP_TILDE);
+	expandarg(n->ncase.expr, &arglist, EXP_TILDE, NULL);
 	exitstatus = 0;
 	for (cp = n->ncase.cases ; cp && evalskip == 0 ; cp = cp->nclist.next) {
 		for (patp = cp->nclist.pattern ; patp ; patp = patp->narg.next) {
@@ -490,13 +498,13 @@ expredir(union node *n)
 		case NTO:
 		case NCLOBBER:
 		case NAPPEND:
-			expandarg(redir->nfile.fname, &fn, EXP_TILDE | EXP_REDIR);
+			expandarg(redir->nfile.fname, &fn, EXP_TILDE | EXP_REDIR, NULL);
 			redir->nfile.expfname = fn.list->text;
 			break;
 		case NFROMFD:
 		case NTOFD:
 			if (redir->ndup.vname) {
-				expandarg(redir->ndup.vname, &fn, EXP_FULL | EXP_TILDE);
+				expandarg(redir->ndup.vname, &fn, EXP_FULL | EXP_TILDE, NULL);
 				fixredir(redir, fn.list->text, 1);
 			}
 			break;
@@ -565,6 +573,25 @@ evalpipe(union node *n, int flags)
 		TRACE(("evalpipe:  job done exit status %d\n", exitstatus));
 	}
 	INTON;
+}
+
+
+
+/*
+ * Write a value to a shell variable.
+ * TODO: flags not needed?
+ * TODO: set up backquote stuff.
+ * TODO: implement recursive variable resolution.
+ */
+
+void
+evalvarw(union node *n, int flags)
+{
+  if (n->nvarw.assign->narg.backquote == NULL)
+    {
+      char *val = strchr (n->nvarw.assign->narg.text, '=') + 1;
+      write_state (n->nvarw.state, val);
+    }
 }
 
 
@@ -718,7 +745,7 @@ evalcommand(union node *cmd, int flags)
 		struct strlist **spp;
 
 		spp = arglist.lastp;
-		expandarg(argp, &arglist, EXP_FULL | EXP_TILDE);
+		expandarg(argp, &arglist, EXP_FULL | EXP_TILDE, NULL);
 		for (sp = *spp; sp; sp = sp->next)
 			argc++;
 	}
@@ -746,7 +773,7 @@ evalcommand(union node *cmd, int flags)
 		char *p;
 
 		spp = varlist.lastp;
-		expandarg(argp, &varlist, EXP_VARTILDE);
+		expandarg(argp, &varlist, EXP_VARTILDE, NULL);
 
 		/*
 		 * Modify the command lookup path, if a PATH= assignment

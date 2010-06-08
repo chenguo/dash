@@ -22,14 +22,14 @@ dash_CFILES = \
         eval.c exec.c expand.c \
 	histedit.c input.c jobs.c mail.c main.c memalloc.c miscbltin.c \
 	mystring.c options.c parser.c redir.c show.c trap.c output.c \
-	bltin/printf.c system.c bltin/test.c bltin/times.c var.c
+	bltin/printf.c states.c system.c bltin/test.c bltin/times.c var.c
 dash_SOURCES = \
 	$(dash_CFILES) \
 	args.h alias.h arith_yacc.h bltin/bltin.h cd.h dgraph.h error.h\
         eval.h exec.h expand.h hetio.h \
 	init.h input.h jobs.h machdep.h mail.h main.h memalloc.h miscbltin.h \
 	myhistedit.h mystring.h options.h output.h parser.h redir.h shell.h \
-	show.h system.h trap.h var.h
+	show.h states.h system.h trap.h var.h
 dash_LDADD = builtins.o init.o nodes.o signames.o syntax.o
 
 HELPERS = mkinit mksyntax mknodes mksignames

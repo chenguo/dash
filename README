@@ -136,3 +136,10 @@ will then continue resolving dependencies for this command.
   Also, loops must support the CONTINUE and BREAK commands. This is
 implemented with
  
+
+Variables
+
+  Variables are set as variable states. When stepping through node tree,
+attempt to read the most recent state of the variable. If the value of the
+state is not written to, enqueue the graph node. Record in the graph's
+argument node the state that it attempted to read from.

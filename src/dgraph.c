@@ -10,11 +10,13 @@
 
 #include "args.h"
 #include "eval.h"
+#include "expand.h"
 #include "shell.h"
 #include "memalloc.h"
 #include "nodes.h"
-#include "show.h"
 #include "parser.h"
+#include "show.h"
+#include "states.h"
 
 
 static struct dg_node * dg_node_create (union node *, int flag,
@@ -24,6 +26,7 @@ static struct dg_file * dg_node_files (union node *, int, struct dg_node *);
 static void dg_cont (struct dg_node *, int, int);
 static void dg_break (struct dg_node *, int, int);
 static void dg_frontier_add (struct dg_node *);
+static union node * copy_command (union node *);
 static void free_command (union node *);
 static void free_deps (struct dg_list *);
 static void free_files (struct dg_file *);
@@ -33,12 +36,8 @@ static struct nodelist * node_list (union node *);
 /* Global frontier structure. */
 static struct dg_frontier *frontier;
 
-enum
-{
-  NO_CLASH,
-  CONCURRENT_READ,
-  WRITE_COLLISION
-};
+/* File access types. */
+enum { NO_CLASH, CONCURRENT_READ, WRITE_COLLISION };
 
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -163,9 +162,10 @@ dg_graph_run (void)
     }
   struct dg_fnode *ret = frontier->run_next;
   frontier_list (RUN, ret->node);
-  if (ret->node->command->type == NCONT ||
-      ret->node->command->type == NBREAK ||
-      (ret->node->flag & CANCELLED) == CANCELLED)
+  if (ret->node->command != NEOF &&
+      (ret->node->command->type == NCONT ||
+       ret->node->command->type == NBREAK ||
+       (ret->node->flag & CANCELLED) == CANCELLED))
     {
       TRACE(("DG GRAPH RUN CONTINUE/BREAK/CANCELLED\n"));
       frontier->run_next = frontier->run_next->next;
@@ -211,7 +211,8 @@ dg_graph_add_node (struct dg_node *new_node, struct dg_fnode *frontier_node,
     {
       new_deps = dg_dep_add (new_node, iter->node);
       new_node->dependencies += new_deps;
-      /* If we hit a loop, and we depend on it, stop here. */
+      /* If we hit a loop, and we depend on it, stop here. We don't want
+         to get tangled with the loop's expanded nodes. */
       if ((iter->type == DG_NWHILE || iter->type == DG_NUNTIL ||
            iter->type == DG_NFOR) && new_deps != 0)
         return;
@@ -234,18 +235,18 @@ dg_graph_remove (struct dg_node *graph_node)
     {
       graph_node->parent->status = 0;
       struct dg_file *file = graph_node->files;
-      while (file && file->name)
+      while (file && file->type != CONTINUE && file->type != BREAK)
         file = file->next;
       if (file)
         {
           struct dg_node *tmp = graph_node;
-          while (tmp->nest > file->name_size)
+          while (tmp->nest > file->nest)
             tmp = tmp->parent->node;
 
           if (graph_node->command->type == NCONT)
-            dg_cont (graph_node, tmp->iteration, file->name_size);
+            dg_cont (graph_node, tmp->iteration, file->nest);
           else
-            dg_break (graph_node, tmp->iteration, file->name_size);
+            dg_break (graph_node, tmp->iteration, file->nest);
         }
     }
   else
@@ -255,8 +256,7 @@ dg_graph_remove (struct dg_node *graph_node)
       for (; iter; iter = iter->next)
         {
           TRACE(("DG GRAPH REMOVE: iter->node %p\n", iter->node));
-          if (--iter->node->dependencies == 0)
-            dg_frontier_add (iter->node);
+          dg_node_dep_decr (iter->node);
         }
       if ((graph_node->flag & FREE_CMD) == FREE_CMD)
         {
@@ -281,7 +281,7 @@ dg_graph_remove (struct dg_node *graph_node)
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *
- *  Functions that deal with graph node creation and dependency checking.
+ *  Functions that deal with graph node creation and dependency management.
  *  dg_node_create
  *  dg_dep_check
  *  dg_dep_create
@@ -301,7 +301,6 @@ dg_node_create (union node *new_cmd, int flag, struct dg_fnode *parent)
   new_node->parent = parent;
   if (parent)
     {
-      //TRACE(("XXX PARENT TYPE %d\n", parent->type));
       if (parent->type == DG_NWHILE || parent->type == DG_NUNTIL ||
           parent->type == DG_NFOR)
         {
@@ -320,25 +319,37 @@ dg_node_create (union node *new_cmd, int flag, struct dg_fnode *parent)
       new_node->iteration = 0;
     }
   new_node->files = dg_node_files (new_cmd, 0, new_node);
-  //TRACE(("XXXX NODE CREATE NEST %d ITER %d\n", new_node->nest, new_node->iteration));
   new_node->flag = flag;
   TRACE(("DG NODE CREATE flag %x\n", flag));
 
   TRACE(("DG NODE CREATE: files: "));
   struct dg_file *file = new_node->files;
   for (; file; file = file->next)
-    TRACE(("%s ", file->name));
+    if (file->type == REG_FILE)
+      TRACE(("%s ", file->file->name));
   TRACE(("\n"));
 
   return new_node;
 }
 
+/* Decrement a node's dependencies by 1, add node to frontier if
+   no more dependencies. */
+void
+dg_node_dep_decr (struct dg_node *graph_node)
+{
+  LOCK_GRAPH;
+  if (--graph_node->dependencies == 0)
+    dg_frontier_add (graph_node);
+  UNLOCK_GRAPH;
+}
+
 /* Cross check file lists for access conflicts. NODE1 is the node being
    added to the graph, NODE2 already exists in the graph. */
+/* TODO: implement file struct as union, for file and continue/break. */
 static int
 dg_dep_check (struct dg_node *node1, struct dg_node *node2)
 {
-  TRACE(("DG DEP CHECK, files1 %p files2 %p\n", node1->files, node2->files));
+  TRACE(("DG DEP CHECK\n"));
   struct dg_file *files1 = node1->files;
   struct dg_file *files2 = node2->files;
   int collision = NO_CLASH;
@@ -347,46 +358,64 @@ dg_dep_check (struct dg_node *node1, struct dg_node *node2)
        /* Check for CONTINUE and BREAK.
           Use NULL name to denote CONTINUE and BREAK.
           Name size denotes the effective nest level. */
-       /* TODO: FIX THE DEP CONDITION */
-       if (files2 && files2->name == NULL && node1->nest != 0
-           && node1->nest >= files2->name_size)
+       /* TODO: Tidy up this if statement. */
+       if ((files2->type == CONTINUE || files2->type == BREAK)
+           && node1->nest != 0 && node1->nest >= files2->nest)
          {
+           TRACE(("DG DEP CHECK CONTINUE/BREAK\n"));
+           /* Get iteration of commands' nest level. */
            struct dg_node *tmp1 = node1;
            struct dg_node *tmp2 = node2;
-           TRACE(("tmp1 nest %d temp2 nest %d c/b nest %d\n", tmp1->nest, tmp2->nest, files2->name_size));
-           /* Get proper iterations. */
-           while (tmp1->nest > files2->name_size)
+           while (tmp1->nest > files2->nest)
              tmp1 = tmp1->parent->node;
-           while (tmp2->nest > files2->name_size)
+           while (tmp2->nest > files2->nest)
              tmp2 = tmp2->parent->node;
-           TRACE(("tmp1 nest %d temp2 nest %d c/b nest %d\n", tmp1->nest, tmp2->nest, files2->name_size));
-           TRACE(("DG DEP CHECK CONTINUE/BREAK, p iters %d %d, iters %d, %d, c/b nest %d, c/b %d\n", tmp1->iteration, tmp2->iteration, node1->iteration, node2->iteration, files2->name_size, files2->flag));
-           if (((files2->flag == CONTINUE &&
-                 tmp1->iteration == tmp2->iteration) ||
-                (files2->flag == BREAK &&
-                 tmp1->iteration >= tmp2->iteration)))
+           if (tmp1->iteration == tmp2->iteration ||
+               (files2->type == BREAK && tmp1->iteration > tmp2->iteration))
              {
-               TRACE(("DG DEP CHECK CONTINUE/BREAK COLLISION\n"));
                collision = WRITE_COLLISION;
+               break;
              }
            continue;
          }
-       else
-         for (; files1; files1 = files1->next)
-           if (files1->name && files2->name &&
-               strcmp (files1->name, files2->name) == 0)
+       else if (files2->type == REG_FILE)
+         {
+           TRACE(("DG DEP CHECK REG FILES\n"));
+           for (; files1; files1 = files1->next)
              {
-               TRACE(("DG DEP CHECK %s, %s match\n", files1->name, files2->name));
-               if (files1->flag == WRITE_ACCESS || files2->flag == WRITE_ACCESS)
-                 collision =  WRITE_COLLISION;
-               else if (collision == NO_CLASH)
-                 collision = CONCURRENT_READ;
+               if (files1->type == WILDCARD)
+                 {
+                   collision = WRITE_COLLISION;
+                   goto dep_out;
+                 }
+               if (files1->type == REG_FILE &&
+                   files1->file->name && files2->file->name &&
+                   strcmp (files1->file->name, files2->file->name) == 0)
+                 {
+                   TRACE(("DG DEP CHECK %s %s match\n", files1->file->name, files2->file->name));
+                   if (files1->file->write || files2->file->write)
+                     {
+                       collision =  WRITE_COLLISION;
+                       break;
+                      }
+                   else if (collision == NO_CLASH)
+                     collision = CONCURRENT_READ;
+                 }
              }
+         }
+       else /* wildcard */
+         {
+           TRACE(("DG DEP CHECK: wildcard.\n"));
+           collision = WRITE_COLLISION;
+           break;
+         }         
     }
+dep_out:
   /* Either no files in common or concurrent read. */
   TRACE(("DG DEP CHECK ret %d\n", collision));
   return collision;
 }
+
 
 /* Create a dependent linked list node. */
 static struct dg_list *
@@ -442,7 +471,7 @@ dg_dep_add (struct dg_node *new_node, struct dg_node *node)
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *
- *  Functions that create a graph node's file list.
+ *  Functions that determine a graph node's file and variable dependencies.
  *  dg_file_append
  *  dg_file_var
  *  dg_file_reg
@@ -463,33 +492,15 @@ dg_file_append (struct dg_file *list1, struct dg_file *list2)
   return list1;
 }
 
-/* Resolve file access for a variable.
-   TODO: could this be cleaned up? */
-static struct dg_file *
-dg_file_var (union node *n)
-{
-  struct dg_file *file = malloc (sizeof *file);
-  char *cmdstr = n->nvar.com->ncmd.assign->narg.text;
-  file->name_size = strchr (cmdstr, '=') - cmdstr + 1;
-  file->name = malloc (file->name_size);
-  file->name[0] = '$';
-  strncpy (file->name + 1, cmdstr, file->name_size);
-  file->name[file->name_size - 1] = '\0';
-  file->flag = WRITE_ACCESS;
-  file->next = NULL;
-  TRACE(("DG FILE VAR: %s\n", file->name));
-
-  /* TODO: handle files access to command that writes shellvar. */
-  //struct nodelist *nodes= n->nvar.com->ncmd.assign->narg.backquote;
-  return file;
-}
-
 /* Resolve file access for a regular file. 
    TODO: could this be cleaned up? */
 static struct dg_file *
 dg_file_reg (union node *n, int nest)
 {
-  struct dg_file *file = malloc (sizeof *file);
+  struct f_dep *file = malloc (sizeof *file);
+  file->write = (n->type == NFROM)? false : true;
+
+  /* Copy name. */
   char *fname = n->nfile.fname->narg.text;
   file->name_size = strlen (fname) + 1;
   file->name = malloc (file->name_size);
@@ -497,12 +508,11 @@ dg_file_reg (union node *n, int nest)
   file->name[file->name_size - 1] = '\0';
   TRACE(("DG FILE REG: %s\n", file->name));
 
-  if (n->type == NFROM)
-    file->flag = READ_ACCESS;
-  else
-    file->flag = WRITE_ACCESS;
-  file->next = dg_node_files (n->nfile.next, nest, NULL);
-  return file;
+  struct dg_file *ret = malloc (sizeof *ret);
+  ret->type = REG_FILE;
+  ret->next = dg_node_files (n->nfile.next, nest, NULL);
+  ret->file = file;
+  return ret;
 }
 
 /* Construct file access list for a graph node's command.
@@ -518,14 +528,15 @@ dg_node_files (union node *n, int nest, struct dg_node *graph_node)
   case NCONT:
   case NBREAK:
     {
-      /* ncmd.assign should be NULL, vars handled with NVAR. */
+      /* ncmd.assign should be NULL, assigning vars handled with NVARW. */
       /* TODO: process ncmd.args for common commands like echo. */
-      struct dg_file *args = arg_files (n, nest, graph_node);
+      struct dg_file *args = arg_proc (n, nest, graph_node);
       struct dg_file *redir = dg_node_files (n->ncmd.redirect, nest, graph_node);
       return dg_file_append (args, redir);      
     }
-  case NVAR:
-    return dg_file_var (n);
+  case NVARW:
+    /* TODO: process background commands' file access. */
+    return NULL;
   case NPIPE:
     {
       /* TODO: resolve files. */
@@ -751,7 +762,7 @@ dg_frontier_expand (struct dg_fnode *parent, union node *n, int flag)
   struct nodelist *iter = commands;
   for (; iter->next; iter = iter->next)
     {
-      new_node = dg_node_create (iter->n, KEEP_CMD | flag, parent);
+      new_node = dg_node_create (iter->n, flag, parent);
       //if (iter->n->type == 6 && iter->n->nredir.n->ncmd.args->narg.next)
         //TRACE(("DG FRONTIER EXPAND type %d, %s %s\n", iter->n->type, iter->n->nredir.n->ncmd.args->narg.text, iter->n->nredir.n->ncmd.args->narg.next->narg.text));
       //else if (iter->n->type == 6)
@@ -762,10 +773,10 @@ dg_frontier_expand (struct dg_fnode *parent, union node *n, int flag)
     }
   int last_flag = 0;
   if (flag == TEST_CMD)
-    last_flag |= TEST_STATUS;
+    last_flag = TEST_STATUS;
   else if (flag == BODY_CMD)
-    last_flag |= BODY_STATUS;
-  new_node = dg_node_create (iter->n, KEEP_CMD | last_flag, parent);
+    last_flag = BODY_STATUS;
+  new_node = dg_node_create (iter->n, last_flag, parent);
   //if (iter->n->type == 6 && iter->n->nredir.n->ncmd.args->narg.next)
     //TRACE(("DG FRONTIER EXPAND type end %d, %s %s\n", iter->n->type, iter->n->nredir.n->ncmd.args->narg.text, iter->n->nredir.n->ncmd.args->narg.next->narg.text));
   //else if (iter->n->type == 6)
@@ -811,7 +822,7 @@ dg_frontier_node_proc (struct dg_fnode *frontier_node)
     free_files (frontier_node->node->files);
     frontier_node->node->files = NULL;
     /* Expand test command. */
-    dg_frontier_expand (frontier_node, command->nbinary.ch1, TEST_CMD);
+    dg_frontier_expand (frontier_node, command->nbinary.ch1, KEEP_CMD | TEST_CMD);
     /* Build new file list and recheck dependents. */
     frontier_node->node->files = dg_node_files (command->nbinary.ch2, 0, frontier_node->node);
     dg_frontier_dep_recheck (frontier_node, frontier_node);
@@ -822,7 +833,7 @@ dg_frontier_node_proc (struct dg_fnode *frontier_node)
     free_files (frontier_node->node->files);
     frontier_node->node->files = NULL;
     /* Expand test command. */
-    dg_frontier_expand (frontier_node, command->nif.test, TEST_CMD);
+    dg_frontier_expand (frontier_node, command->nif.test, KEEP_CMD | TEST_CMD);
     /* Build new file list and recheck dependents. */
     struct dg_file *list1 = dg_node_files (command->nif.ifpart, 0, frontier_node->node);
     struct dg_file *list2 = dg_node_files (command->nif.elsepart, 0, frontier_node->node);
@@ -841,10 +852,35 @@ dg_frontier_node_proc (struct dg_fnode *frontier_node)
     frontier_node->node->files = NULL;
     frontier_node->node->dependents = NULL;
     /* Expand test command. */
-    dg_frontier_expand (frontier_node, command->nbinary.ch1, TEST_CMD);
+    dg_frontier_expand (frontier_node, command->nbinary.ch1, KEEP_CMD | TEST_CMD);
     /* Restore files and dependents. */
     frontier_node->node->files = saved_files;
     frontier_node->node->dependents = saved_deps;
+    break;
+  case NFOR:
+    frontier_node->type = DG_NFOR;
+    /* Free files. */
+    free_files (frontier_node->node->files);
+    frontier_node->node->files = NULL;
+    /* Resolve argument list. */
+    /* TODO: for now, assume arguments dont need expanding,
+       i.e. no globbing or {1..10} business. */
+    union node *args = command->nfor.args;
+    /* For each state of argument, create and write state, then
+       expand body. */
+    TRACE(("DG FRONTIER NODE PROC: FOR var %s\n", command->nfor.var));
+    for (; args; args = args->narg.next)
+      {
+         /* Set variable. */
+         TRACE(("DG FRONTIER NODE PROC: for arg %s\n", args->narg.text));
+         struct var_state *state = create_state (command->nfor.var);
+         TRACE(("DG FRONTIER NODE PROC: %p state\n", state));
+         write_state (state, args->narg.text);
+         union node *copy = copy_command (command->nfor.body);
+         dg_frontier_expand (frontier_node, copy, FREE_CMD | BODY_CMD);
+      }
+    /* Recheck dependents. */
+    dg_frontier_dep_recheck (frontier_node, frontier_node);
     break;
   default:
     frontier_node->type = DG_NCMD;
@@ -881,7 +917,7 @@ dg_frontier_parent_proc (struct dg_fnode *rem)
     if ((rem->status == 0 && parent->type == DG_NAND) ||
         (rem->status != 0 && parent->type == DG_NOR))
       dg_frontier_expand (parent, parent->node->command->nbinary.ch2,
-                          BODY_CMD);
+                          KEEP_CMD | BODY_CMD);
     /* Recheck dependents. */
     dg_frontier_dep_recheck (parent, parent);
     /* Set status to DG_NCMD to label node removable. */
@@ -895,7 +931,7 @@ dg_frontier_parent_proc (struct dg_fnode *rem)
     /* Expand appropriate commands. */
     expand = (rem->status == 0)? parent->node->command->nif.ifpart
                                : parent->node->command->nif.elsepart;
-    dg_frontier_expand (parent, expand, BODY_CMD);
+    dg_frontier_expand (parent, expand, KEEP_CMD | BODY_CMD);
     /* Recheck IF's dependents. */
     dg_frontier_dep_recheck (parent, parent);
     /* Set status to DG_NCMD to label node removable. */
@@ -915,12 +951,12 @@ dg_frontier_parent_proc (struct dg_fnode *rem)
         (rem->status != 0 && parent->type == DG_NUNTIL))
       {
         dg_frontier_expand (parent, parent->node->command->nbinary.ch2,
-                            BODY_CMD);
+                            KEEP_CMD | BODY_CMD);
         /* Increment iteration cont, recycle test condition. */
         parent->iteration++;
         //TRACE(("XXX ITERATION %d, type %d\n", parent->iteration, parent->type));
         dg_frontier_expand (parent, parent->node->command->nbinary.ch1,
-                            TEST_CMD);
+                            KEEP_CMD | TEST_CMD);
         /* Restore files and dependents. */
         parent->node->files = saved_files;
         parent->node->dependents = saved_deps;
@@ -1019,6 +1055,7 @@ dg_frontier_remove (struct dg_fnode *rem)
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
  *
  *  Misc functions that support the graph.
+ *  copy_command
  *  free_command
  *  free_deps
  *  free_files
@@ -1031,6 +1068,120 @@ dg_frontier_remove (struct dg_fnode *rem)
  *  node_proc
  * 
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+
+/* Copy text. */
+static char *
+copy_text (char *s)
+{
+  int slen = strlen (s) + 1;
+  char *ret = malloc (slen);
+  memcpy (ret, s, slen);
+  return ret;
+}
+
+/* Copy a command. Dash uses that stack thing, so we
+   can't just use copynode in nodes.c. */
+static union node *
+copy_command (union node *node)
+{
+  if (!node)
+    return NULL;
+
+  union node *ret = NULL;
+  switch (node->type) {
+  case NCMD:
+  case NCONT:
+  case NBREAK:
+    ret = (union node *) malloc (sizeof (struct ncmd));
+    ret->ncmd.assign = copy_command (node->ncmd.assign);
+    ret->ncmd.args = copy_command (node->ncmd.args);
+    ret->ncmd.redirect = copy_command (node->ncmd.redirect);
+    break;
+  case NVARW:
+    ret = (union node *) malloc (sizeof (struct nvarw));
+    ret->nvarw.assign = copy_command (node->nvarw.assign);
+    ret->nvarw.redirect = copy_command (node->nvarw.redirect);
+    /* TODO: copy state. */
+    //ret->nvarw.state = 
+    break;
+  case NPIPE:
+    ret = (union node *) malloc (sizeof (struct npipe));
+    /* TODO: copy ndoelist. */
+    ret->npipe.backgnd = node->npipe.backgnd;
+    //ret->npipe.cmdlist =
+    break;
+  case NREDIR:
+  case NBACKGND:
+  case NSUBSHELL:
+    ret = (union node *) malloc (sizeof (struct nredir));
+    ret->nredir.n = copy_command (node->nredir.n);
+    ret->nredir.redirect = copy_command (node->nredir.redirect);
+    break;
+  case NAND:
+  case NOR:
+  case NSEMI:
+  case NWHILE:
+  case NUNTIL:
+    ret = (union node *) malloc (sizeof (struct nbinary));
+    ret->nbinary.ch1 = copy_command (node->nbinary.ch1);
+    ret->nbinary.ch2 = copy_command (node->nbinary.ch2);
+    break;
+  case NIF:
+    ret = (union node *) malloc (sizeof (struct nif));
+    ret->nif.test = copy_command (node->nif.test);
+    ret->nif.ifpart = copy_command (node->nif.ifpart);
+    ret->nif.elsepart = copy_command (node->nif.elsepart);
+    break;
+  case NFOR:
+    ret = (union node *) malloc (sizeof (struct nfor));
+    ret->nfor.args = copy_command (node->nfor.args);
+    ret->nfor.body = copy_command (node->nfor.body);
+    ret->nfor.var = copy_text (node->nfor.var);
+    break;
+  case NCASE:
+    ret = (union node *) malloc (sizeof (struct ncase));
+    ret->ncase.expr = copy_command (node->ncase.expr);
+    ret->ncase.cases = copy_command (node->ncase.cases);
+    break;
+  case NCLIST:
+    ret = (union node *) malloc (sizeof (struct nclist));
+    ret->nclist.next = copy_command (node->nclist.next);
+    ret->nclist.pattern = copy_command (node->nclist.pattern);
+    ret->nclist.body = copy_command (node->nclist.body);
+    break;
+  case NDEFUN:
+  case NARG:
+    ret = (union node *) malloc (sizeof (struct narg));
+    ret->narg.next = copy_command (node->nclist.next);
+    ret->narg.text = copy_text (node->narg.text);
+    /* TODO: nodelist, statelist. */
+    //ret->narg.nodelist =
+    //ret->narg.statelist =
+    break;
+  case NTO:
+  case NCLOBBER:
+  case NFROM:
+  case NFROMTO:
+  case NAPPEND:
+    ret = (union node *) malloc (sizeof (struct nfile));
+    ret->nfile.next = copy_command (node->nfile.next);
+    ret->nfile.fd = node->nfile.fd;
+    ret->nfile.fname = copy_command (node->nfile.fname);
+    /* TODO: expfname */
+    //ret->nfile.expfname =
+    break;
+  case NFROMFD:
+  case NTOFD:
+  case NHERE:
+  case NXHERE:
+  case NNOT:
+  default:
+    /* not yet supported. */
+    break;
+  }
+  ret->type = node->type;
+  return ret;
+}
 
 /* Free node tree returned by parsecmd. */
 static void
@@ -1048,9 +1199,10 @@ free_command (union node *node)
     free_command (node->ncmd.args);
     free_command (node->ncmd.redirect);
     break;
-  case NVAR:
-    TRACE(("FREE_COMMAND: NVAR\n"));
-    free_command (node->nvar.com);
+  case NVARW:
+    TRACE(("FREE_COMMAND: NVARW\n"));
+    free_command (node->nvarw.assign);
+    free_command (node->nvarw.redirect);
     break;
   case NPIPE:
     TRACE(("FREE_COMMAND: NPIPE\n"));
@@ -1082,7 +1234,7 @@ free_command (union node *node)
     TRACE(("FREE_COMMAND: NFOR\n"));
     free_command (node->nfor.args);
     free_command (node->nfor.body);
-    free (node->nfor.var);
+    //free (node->nfor.var);
     break;
   case NCASE:
     TRACE(("FREE_COMMAND: NCASE\n"));
@@ -1099,8 +1251,10 @@ free_command (union node *node)
   case NARG:
     TRACE(("FREE_COMMAND: NARG\n"));
     free_command (node->narg.next);
-    free (node->narg.text);
+    //free (node->narg.text);
     /* TODO: free nodelist: node->narg.backquote */
+    if (node->narg.backquote)
+      TRACE(("GOT BACKQUOTE\n"));
     break;
   case NTO:
   case NCLOBBER:
@@ -1156,7 +1310,11 @@ free_files (struct dg_file *files)
   while (files)
     {
       next = files->next;
-      free (files->name);
+      if (files->type == REG_FILE)
+        {
+          free (files->file->name);
+          free (files->file);
+        }
       free (files);
       files = next;
     }
@@ -1183,16 +1341,6 @@ node_wrap_nbackgnd (union node *n)
   nwrap->type = NBACKGND;
   nwrap->nredir.n = n;
   nwrap->nredir.redirect = NULL;
-  return nwrap;
-}
-
-/* Wrap N with NVAR node. */
-static union node *
-node_wrap_nvar (union node *n)
-{
-  union node *nwrap = (union node *) malloc (sizeof (struct nvar));
-  nwrap->type = NVAR;	
-  nwrap->nvar.com = n;
   return nwrap;
 }
 
@@ -1234,7 +1382,11 @@ node_proc_ncmd (union node *n)
         n = node_wrap_nbackgnd (n);
     }
   else if (n->ncmd.assign && n->ncmd.assign->narg.text)
-    n = node_wrap_nvar (n);
+    {
+      struct var_state *state = create_state (n->ncmd.assign->narg.text);
+      n->type = NVARW;
+      n->nvarw.state = state;
+    }
   return n;
 }
 
@@ -1287,6 +1439,7 @@ node_proc (union node *n)
     TRACE(("NODE PROC: NSEMI\n"));
     node_proc (n->nbinary.ch1);
     node_proc (n->nbinary.ch2);
+    free (n);
     return;
   case NNOT:
     /* TODO: handle NOT of non-regular commands. */

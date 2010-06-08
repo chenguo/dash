@@ -57,9 +57,11 @@ NBREAK ncmd			# a break command
 	args	  nodeptr		# the arguments
 	redirect  nodeptr		# list of file redirections
 
-NVAR nvar			# a variable assignment
+NVARW nvarw			# a variable assignment
 	type	  int
-	com	  nodeptr		# assignment command
+	assign	  nodeptr		# assignment command
+	state	  stateptr		# state to write to
+	redirect  nodeptr		# leftovers from ncmd
 
 NPIPE npipe			# a pipeline
 	type	  int
@@ -117,6 +119,7 @@ NARG narg			# represents a word
 	next	  nodeptr		# next word in list
 	text	  string		# the text of the word
 	backquote nodelist		# list of commands in back quotes
+	vars	  statelist		# list of variables states' used
 
 NTO nfile			# fd> fname
 NCLOBBER nfile			# fd>| fname

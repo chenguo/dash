@@ -305,7 +305,7 @@ openhere(union node *redir)
 
 	p = redir->nhere.doc->narg.text;
 	if (redir->type == NXHERE) {
-		expandarg(redir->nhere.doc, NULL, EXP_QUOTED);
+		expandarg(redir->nhere.doc, NULL, EXP_QUOTED, NULL);
 		p = stackblock();
 	}
 

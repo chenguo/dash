@@ -260,12 +260,13 @@ cmdloop(int top)
 			job_warning = (job_warning == 2) ? 1 : 0;
 			numeof = 0;
 			if (n->type == NIF || n->type == NAND || n->type == NOR
-			   || n->type == NWHILE || n->type == NUNTIL) {
-				; /* Do nothing. Nodes expanded in graph. */
-			} else if (n->type == NVAR) {
+			    || n->type == NWHILE || n->type == NUNTIL
+			    || n->type == NFOR) {
+				; /* Do nothing. Nodes expanded in graph. TODO: refactor to dgraph. */
+			} else if (n->type == NVARW) {
 				pthread_t thread;
 				struct et_args *args = malloc (sizeof *args);
-				args->node = n->nvar.com;
+				args->node = n;
 				args->fnode = frontier_node;
 				pthread_create (&thread, NULL, evaltree_thread,
 						args);

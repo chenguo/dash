@@ -364,6 +364,7 @@ TRACE(("expecting DO got %s %s\n", tokname[got], got == TWORD ? wordtext : ""));
 				n2->type = NARG;
 				n2->narg.text = wordtext;
 				n2->narg.backquote = backquotelist;
+				n2->narg.vars = NULL;
 				*app = n2;
 				app = &n2->narg.next;
 			}
@@ -377,6 +378,7 @@ TRACE(("expecting DO got %s %s\n", tokname[got], got == TWORD ? wordtext : ""));
 			n2->narg.text = (char *)dolatstr;
 			n2->narg.backquote = NULL;
 			n2->narg.next = NULL;
+			n2->narg.vars = NULL;
 			n1->nfor.args = n2;
 			/*
 			 * Newline or semicolon here is optional (but note
@@ -401,6 +403,7 @@ TRACE(("expecting DO got %s %s\n", tokname[got], got == TWORD ? wordtext : ""));
 		n2->narg.text = wordtext;
 		n2->narg.backquote = backquotelist;
 		n2->narg.next = NULL;
+		n2->narg.vars = NULL;
 		checkkwd = CHKNL | CHKKWD | CHKALIAS;
 		if (readtoken() != TIN)
 			synexpect(TIN);
@@ -419,6 +422,7 @@ next_case:
 				ap->type = NARG;
 				ap->narg.text = wordtext;
 				ap->narg.backquote = backquotelist;
+				ap->narg.vars = NULL;
 				if (readtoken() != TPIPE)
 					break;
 				app = &ap->narg.next;
@@ -510,6 +514,7 @@ simplecmd(void) {
 			n->type = NARG;
 			n->narg.text = copyfromstack (wordtext);
 			n->narg.backquote = backquotelist;
+			n->narg.vars = NULL;
 			if (savecheckkwd && isassignment(wordtext)) {
 				*vpp = n;
 				vpp = &n->narg.next;
@@ -568,6 +573,7 @@ out:
 		n->ncmd.args->narg.next = args->narg.next;
 		n->ncmd.args->narg.text = args->narg.text;
 		n->ncmd.args->narg.backquote = args->narg.backquote;
+		n->ncmd.args->narg.vars = NULL;
 	}
 	else
 		n->ncmd.args = NULL;
@@ -586,6 +592,7 @@ makename(void)
 	n->narg.next = NULL;
 	n->narg.text = copyfromstack (wordtext);
 	n->narg.backquote = backquotelist;
+	n->narg.vars = NULL;
 	TRACE(("File name %s\n", n->narg.text));
 	return n;
 }
@@ -667,6 +674,7 @@ parseheredoc(void)
 		n->narg.next = NULL;
 		n->narg.text = wordtext;
 		n->narg.backquote = backquotelist;
+		n->narg.vars = NULL;
 		here->here->nhere.doc = n;
 		here = here->next;
 	}
@@ -1545,7 +1553,7 @@ expandstr(const char *ps)
 	n.narg.text = wordtext;
 	n.narg.backquote = backquotelist;
 
-	expandarg(&n, NULL, EXP_QUOTED);
+	expandarg(&n, NULL, EXP_QUOTED, NULL);
 	return stackblock();
 }
 

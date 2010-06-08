@@ -59,6 +59,7 @@
 #include "shell.h"
 #include "main.h"
 #include "nodes.h"
+#include "dgraph.h"
 #include "eval.h"
 #include "expand.h"
 #include "syntax.h"
@@ -71,6 +72,7 @@
 #include "error.h"
 #include "mystring.h"
 #include "show.h"
+#include "states.h"
 #include "system.h"
 
 /*
@@ -109,14 +111,14 @@ static struct ifsregion *ifslastp;
 /* holds expanded arg list */
 static struct arglist exparg;
 
-STATIC void argstr(char *, int);
+STATIC void argstr(char *, int, struct dg_node *);
 STATIC char *exptilde(char *, char *, int);
 STATIC void expbackq(union node *, int);
-STATIC const char *subevalvar(char *, char *, int, int, int, int, int);
-STATIC char *evalvar(char *, int);
+STATIC const char *subevalvar(char *, char *, int, int, int, int, int, struct dg_node *);
+STATIC char *evalvar(char *, int, struct dg_node *);
 STATIC size_t strtodest(const char *, const char *, int);
 STATIC void memtodest(const char *, size_t, const char *, int);
-STATIC ssize_t varvalue(char *, int, int);
+STATIC ssize_t varvalue(char *, int, int, struct dg_node *);
 STATIC void ifsfree(void);
 STATIC void expandmeta(struct strlist *, int);
 #ifdef HAVE_GLOB
@@ -184,7 +186,7 @@ static inline const char *getpwhome(const char *name)
  */
 
 void
-expandarg(union node *arg, struct arglist *arglist, int flag)
+expandarg(union node *arg, struct arglist *arglist, int flag, struct dg_node *graph_node)
 {
 	struct strlist *sp;
 	char *p;
@@ -193,7 +195,7 @@ expandarg(union node *arg, struct arglist *arglist, int flag)
 	STARTSTACKSTR(expdest);
 	ifsfirst.next = NULL;
 	ifslastp = NULL;
-	argstr(arg->narg.text, flag);
+	argstr(arg->narg.text, flag, graph_node);
 	p = _STPUTC('\0', expdest);
 	expdest = p - 1;
 	if (arglist == NULL) {
@@ -235,8 +237,9 @@ expandarg(union node *arg, struct arglist *arglist, int flag)
  */
 
 STATIC void
-argstr(char *p, int flag)
+argstr(char *p, int flag, struct dg_node *graph_node)
 {
+	TRACE(("ARGSTR %s\n", p));
 	static const char spclchars[] = {
 		'=',
 		':',
@@ -322,7 +325,7 @@ start:
 			/* "$@" syntax adherence hack */
 			if (inquotes && !memcmp(p, dolatstr + 1,
 						DOLATSTRLEN - 1)) {
-				p = evalvar(p + 1, flag | inquotes) + 1;
+				p = evalvar(p + 1, flag | inquotes, graph_node) + 1;
 				goto start;
 			}
 addquote:
@@ -347,7 +350,7 @@ addquote:
 
 			goto addquote;
 		case CTLVAR:
-			p = evalvar(p, flag | inquotes);
+			p = evalvar(p, flag | inquotes, graph_node);
 			goto start;
 		case CTLBACKQ:
 			expbackq(argbackq->n, flag | inquotes);
@@ -644,7 +647,8 @@ scanright(
 }
 
 STATIC const char *
-subevalvar(char *p, char *str, int strloc, int subtype, int startloc, int varflags, int flag)
+subevalvar(char *p, char *str, int strloc, int subtype, int startloc, int varflags, int flag,
+           struct dg_node *graph_node)
 {
 	int quotes = flag & QUOTES_ESC;
 	char *startp;
@@ -656,7 +660,7 @@ subevalvar(char *p, char *str, int strloc, int subtype, int startloc, int varfla
 	char *(*scan)(char *, char *, char *, char *, int , int);
 
 	argstr(p, EXP_TILDE | (subtype != VSASSIGN && subtype != VSQUESTION ?
-			       (flag & EXP_QUOTED ? EXP_QPAT : EXP_CASE) : 0));
+			       (flag & EXP_QUOTED ? EXP_QPAT : EXP_CASE) : 0), graph_node);
 	STPUTC('\0', expdest);
 	argbackq = saveargbackq;
 	startp = stackblock() + startloc;
@@ -719,7 +723,7 @@ subevalvar(char *p, char *str, int strloc, int subtype, int startloc, int varfla
  * input string.
  */
 STATIC char *
-evalvar(char *p, int flag)
+evalvar(char *p, int flag, struct dg_node *graph_node)
 {
 	int subtype;
 	int varflags;
@@ -744,7 +748,7 @@ evalvar(char *p, int flag)
 	p = strchr(p, '=') + 1;
 
 again:
-	varlen = varvalue(var, varflags, flag);
+	varlen = varvalue(var, varflags, flag, graph_node);
 	if (varflags & VSNUL)
 		varlen--;
 
@@ -756,7 +760,7 @@ again:
 	if (subtype == VSMINUS) {
 vsplus:
 		if (varlen < 0) {
-			argstr(p, flag | EXP_TILDE | EXP_WORD);
+			argstr(p, flag | EXP_TILDE | EXP_WORD, graph_node);
 			goto end;
 		}
 		if (easy)
@@ -767,7 +771,8 @@ vsplus:
 	if (subtype == VSASSIGN || subtype == VSQUESTION) {
 		if (varlen < 0) {
 			if (subevalvar(p, var, 0, subtype, startloc,
-				       varflags, flag & ~QUOTES_ESC)) {
+				       varflags, flag & ~QUOTES_ESC,
+                                       graph_node)) {
 				varflags &= ~VSNUL;
 				/* 
 				 * Remove any recorded regions beyond 
@@ -820,7 +825,8 @@ record:
 		STPUTC('\0', expdest);
 		patloc = expdest - (char *)stackblock();
 		if (subevalvar(p, NULL, patloc, subtype,
-			       startloc, varflags, flag) == 0) {
+			       startloc, varflags, flag,
+                               graph_node) == 0) {
 			int amount = expdest - (
 				(char *)stackblock() + patloc - 1
 			);
@@ -901,8 +907,9 @@ strtodest(p, syntax, quotes)
  */
 
 STATIC ssize_t
-varvalue(char *name, int varflags, int flags)
+varvalue(char *name, int varflags, int flags, struct dg_node *graph_node)
 {
+	TRACE(("VARVALUE\n"));
 	int num;
 	char *p;
 	int i;
@@ -915,6 +922,7 @@ varvalue(char *name, int varflags, int flags)
 	int discard = subtype == VSPLUS || subtype == VSLENGTH;
 	int quotes = (discard ? 0 : (flags & QUOTES_ESC)) | QUOTES_KEEPNUL;
 	ssize_t len = 0;
+	struct var_state *state;
 
 	sep = quoted ? ((flags & EXP_FULL) << CHAR_BIT) : 0;
 	syntax = quoted ? DQSYNTAX : BASESYNTAX;
@@ -981,7 +989,15 @@ param:
 		p = num ? shellparam.p[num - 1] : arg0;
 		goto value;
 	default:
-		p = lookupvar(name);
+		state = read_state (name);
+		if (state)
+			p = state->val;
+		else {
+			/* Enqueue state. */
+			p = NULL;
+			queue_state (graph_node, state);
+		}
+		//p = lookupvar(name);
 value:
 		if (!p)
 			return -1;
@@ -1685,7 +1701,7 @@ casematch(union node *pattern, char *val)
 	argbackq = pattern->narg.backquote;
 	STARTSTACKSTR(expdest);
 	ifslastp = NULL;
-	argstr(pattern->narg.text, EXP_TILDE | EXP_CASE);
+	argstr(pattern->narg.text, EXP_TILDE | EXP_CASE, NULL);
 	STACKSTRNUL(expdest);
 	result = patmatch(stackblock(), val);
 	popstackmark(&smark);
